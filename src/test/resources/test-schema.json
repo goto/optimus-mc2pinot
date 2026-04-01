@@ -1,0 +1,21 @@
+{
+  "schemaName" : "test_table",
+  "dimensionFieldSpecs" : [ {
+    "name" : "id",
+    "dataType" : "STRING"
+  }, {
+    "name" : "name",
+    "dataType" : "STRING"
+  } ],
+  "metricFieldSpecs" : [ {
+    "name" : "value",
+    "dataType" : "LONG"
+  } ],
+  "dateTimeFieldSpecs" : [ {
+    "name" : "ts",
+    "dataType": "LONG",
+    "format": "1:MILLISECONDS:EPOCH",
+    "granularity": "1:DAYS"
+  } ]
+}
+
