@@ -11,8 +11,7 @@
 
     <properties>
         <java.version>25</java.version>
-        <maven.compiler.source>${java.version}</maven.compiler.source>
-        <maven.compiler.target>${java.version}</maven.compiler.target>
+        <maven.compiler.release>${java.version}</maven.compiler.release>
         <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
         <project.reporting.outputEncoding>UTF-8</project.reporting.outputEncoding>
         <pinot.version>1.3.0</pinot.version>
@@ -95,8 +94,7 @@
                 <artifactId>maven-compiler-plugin</artifactId>
                 <version>3.13.0</version>
                 <configuration>
-                    <source>${java.version}</source>
-                    <target>${java.version}</target>
+                    <release>${java.version}</release>
                     <encoding>UTF-8</encoding>
                 </configuration>
             </plugin>
@@ -106,6 +104,8 @@
                 <version>3.5.2</version>
                 <configuration>
                     <argLine>
+                        -Dnet.bytebuddy.experimental=true
+                        -XX:+EnableDynamicAgentLoading
                         --add-exports=java.base/jdk.internal.ref=ALL-UNNAMED
                         --add-exports=java.base/sun.nio.ch=ALL-UNNAMED
                         --add-exports=jdk.unsupported/sun.misc=ALL-UNNAMED
