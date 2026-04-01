@@ -1,0 +1,149 @@
+package com.gojek.mc2pinot;
+
+import com.aliyun.odps.Odps;
+import com.aliyun.odps.account.Account;
+import com.aliyun.odps.account.AliyunAccount;
+import com.aliyun.oss.OSS;
+import com.aliyun.oss.OSSClientBuilder;
+import com.gojek.mc2pinot.config.MaxcomputeConfig;
+import com.gojek.mc2pinot.config.OSSConfig;
+import com.gojek.mc2pinot.config.PinotConfig;
+import com.gojek.mc2pinot.core.PinotSegmenter;
+import com.gojek.mc2pinot.core.SegmentInfo;
+import com.gojek.mc2pinot.core.partition.PartitionFunction;
+import com.gojek.mc2pinot.core.partition.PartitionFunctionFactory;
+import com.gojek.mc2pinot.mc.MCUnloader;
+import com.gojek.mc2pinot.mc.QueryUnloadBuilder;
+import com.gojek.mc2pinot.oss.OSSCleaner;
+import com.gojek.mc2pinot.oss.OSSReader;
+import com.gojek.mc2pinot.oss.OSSWriter;
+import com.gojek.mc2pinot.pinot.DefaultPinotClient;
+import com.gojek.mc2pinot.pinot.PinotClient;
+import com.gojek.mc2pinot.pinot.PinotSegmentUploader;
+import org.apache.pinot.spi.config.table.ColumnPartitionConfig;
+import org.apache.pinot.spi.config.table.SegmentPartitionConfig;
+import org.apache.pinot.spi.config.table.TableConfig;
+import org.apache.pinot.spi.data.Schema;
+import org.apache.pinot.spi.utils.JsonUtils;
+
+import java.io.FileInputStream;
+import java.io.InputStream;
+import java.net.http.HttpClient;
+import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
+import java.nio.file.Paths;
+import java.util.List;
+import java.util.Map;
+import java.util.logging.Handler;
+import java.util.logging.Logger;
+
+public class Main {
+
+    private static final Logger LOG = Logger.getLogger(Main.class.getName());
+
+    static {
+        LogFormatter formatter = new LogFormatter();
+        Logger rootLogger = Logger.getLogger("");
+        for (Handler handler : rootLogger.getHandlers()) {
+            handler.setFormatter(formatter);
+        }
+    }
+
+    public static void main(String[] args) throws Exception {
+        Map<String, String> env = System.getenv();
+
+        MaxcomputeConfig mcConfig = new MaxcomputeConfig(env);
+        OSSConfig ossConfig = new OSSConfig(env);
+        PinotConfig pinotConfig = new PinotConfig(env);
+
+        String query = Files.readString(Paths.get(mcConfig.getQueryFilePath()), StandardCharsets.UTF_8);
+
+        OSS ossClient = buildOSSClient(ossConfig);
+        try {
+            new OSSCleaner(ossClient).clean(ossConfig.getDestinationURI());
+
+            Odps odpsClient = buildOdpsClient(mcConfig);
+            MCUnloader mcUnloader = new MCUnloader(
+                    odpsClient,
+                    new QueryUnloadBuilder(),
+                    ossConfig.getRoleArn(),
+                    pinotConfig.getInputFormat());
+            mcUnloader.unload(query, ossConfig.getDestinationURI());
+
+            try (OSSReader ossReader = new OSSReader(ossClient, ossConfig.getDestinationURI())) {
+                OSSWriter ossWriter = new OSSWriter(ossClient, ossConfig.getDestinationURI());
+
+                Schema schema = loadSchema(pinotConfig.getSchemaFilePath());
+                TableConfig tableConfig = loadTableConfig(pinotConfig.getTableConfigFilePath());
+
+                PartitionFunction partitionFunction = PartitionFunctionFactory.create(
+                        resolvePartitionFunctionName(tableConfig));
+
+                PinotSegmenter segmenter = new PinotSegmenter(
+                        ossReader, ossWriter, pinotConfig.getSegmentKey(),
+                        pinotConfig.getInputFormat(), schema, tableConfig, partitionFunction);
+
+                List<SegmentInfo> segments = segmenter.generateSegment();
+
+                HttpClient httpClient = HttpClient.newBuilder()
+                        .version(HttpClient.Version.HTTP_1_1)
+                        .build();
+                PinotClient pinotClient = new DefaultPinotClient(pinotConfig.getHost(), httpClient);
+                PinotSegmentUploader uploader = new PinotSegmentUploader(pinotClient);
+                try {
+                    uploader.upload(segments, tableConfig.getTableName());
+                } finally {
+                    for (SegmentInfo seg : segments) {
+                        if (seg.localPath() != null) {
+                            seg.localPath().toFile().delete();
+                        }
+                    }
+                }
+            }
+        } finally {
+            ossClient.shutdown();
+        }
+    }
+
+    private static Odps buildOdpsClient(MaxcomputeConfig config) {
+        Account account = new AliyunAccount(config.getAccessId(), config.getAccessKey());
+        Odps odps = new Odps(account);
+        odps.setDefaultProject(config.getProjectName());
+        odps.setEndpoint(config.getEndpoint());
+        return odps;
+    }
+
+    private static OSS buildOSSClient(OSSConfig config) {
+        return new OSSClientBuilder().build(
+                config.getEndpoint(),
+                config.getAccessKeyId(),
+                config.getAccessKeySecret());
+    }
+
+    private static Schema loadSchema(String filePath) throws Exception {
+        try (InputStream is = new FileInputStream(filePath)) {
+            return Schema.fromInputStream(is);
+        }
+    }
+
+    private static TableConfig loadTableConfig(String filePath) throws Exception {
+        try (InputStream is = new FileInputStream(filePath)) {
+            String json = new String(is.readAllBytes(), StandardCharsets.UTF_8);
+            return JsonUtils.stringToObject(json, TableConfig.class);
+        }
+    }
+
+    private static String resolvePartitionFunctionName(TableConfig tableConfig) {
+        SegmentPartitionConfig partitionConfig = tableConfig.getIndexingConfig() != null
+                ? tableConfig.getIndexingConfig().getSegmentPartitionConfig() : null;
+        if (partitionConfig == null) {
+            return null;
+        }
+        Map<String, ColumnPartitionConfig> columnMap = partitionConfig.getColumnPartitionMap();
+        if (columnMap == null || columnMap.isEmpty()) {
+            return null;
+        }
+        return columnMap.values().iterator().next().getFunctionName();
+    }
+}
+
