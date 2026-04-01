@@ -34,3 +34,7 @@ MC (Maxcompute) --> OSS (Object Storage Service) --> Segment Generation --> OSS 
    ```
    java -jar target/optimus-mc2pinot.jar
    ```
+4. Or run using maven exec plugin:
+   ```
+   mvn clean compile exec:exec
+   ```
