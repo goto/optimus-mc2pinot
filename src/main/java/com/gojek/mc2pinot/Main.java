@@ -50,6 +50,7 @@ public class Main {
     }
 
     public static void main(String[] args) throws Exception {
+        LOG.info("starting...");
         Map<String, String> env = System.getenv();
 
         MaxcomputeConfig mcConfig = new MaxcomputeConfig(env);
@@ -103,6 +104,7 @@ public class Main {
         } finally {
             ossClient.shutdown();
         }
+        LOG.info("success");
     }
 
     private static Odps buildOdpsClient(MaxcomputeConfig config) {

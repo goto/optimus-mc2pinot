@@ -21,4 +21,5 @@ ENTRYPOINT ["java", \
     "--add-opens=java.base/java.lang.reflect=ALL-UNNAMED", \
     "--add-opens=java.base/javax.security.auth=ALL-UNNAMED", \
     "--enable-native-access=ALL-UNNAMED", \
+    "--sun-misc-unsafe-memory-access=allow", \
     "-jar", "/app/app.jar"]
