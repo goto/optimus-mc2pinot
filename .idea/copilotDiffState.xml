@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project version="4">
+  <component name="CopilotDiffPersistence">
+    <option name="pendingDiffs">
+      <map>
+        <entry key="$PROJECT_DIR$/src/main/java/com/gojek/mc2pinot/io/Reader.java">
+          <value>
+            <PendingDiffInfo>
+              <option name="filePath" value="$PROJECT_DIR$/src/main/java/com/gojek/mc2pinot/io/Reader.java" />
+              <option name="updatedContent" value="package com.gojek.mc2pinot.io;&#10;&#10;import java.io.Closeable;&#10;import java.io.IOException;&#10;import java.nio.file.Path;&#10;import java.util.List;&#10;&#10;public interface Reader extends Closeable {&#10;&#10;    List&lt;Path&gt; read() throws IOException;&#10;}&#10;" />
+            </PendingDiffInfo>
+          </value>
+        </entry>
+      </map>
+    </option>
+  </component>
+</project>
