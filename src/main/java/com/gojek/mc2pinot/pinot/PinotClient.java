@@ -1,0 +1,16 @@
+package com.gojek.mc2pinot.pinot;
+
+import java.io.IOException;
+import java.nio.file.Path;
+
+public interface PinotClient {
+
+    String triggerUpload(Path segmentFile, String tableName) throws IOException;
+
+    String triggerUploadFromUri(String ossUri, String tableName) throws IOException;
+
+    String getSchema(String tableName) throws IOException;
+
+    String getTableConfig(String tableName) throws IOException;
+}
+
