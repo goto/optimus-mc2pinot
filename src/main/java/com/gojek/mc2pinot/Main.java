@@ -5,18 +5,17 @@ import com.aliyun.odps.account.Account;
 import com.aliyun.odps.account.AliyunAccount;
 import com.aliyun.oss.OSS;
 import com.aliyun.oss.OSSClientBuilder;
+import com.gojek.mc2pinot.config.FsConfig;
 import com.gojek.mc2pinot.config.MaxcomputeConfig;
-import com.gojek.mc2pinot.config.OSSConfig;
 import com.gojek.mc2pinot.config.PinotConfig;
 import com.gojek.mc2pinot.core.PinotSegmenter;
 import com.gojek.mc2pinot.core.SegmentInfo;
 import com.gojek.mc2pinot.core.partition.PartitionFunction;
 import com.gojek.mc2pinot.core.partition.PartitionFunctionFactory;
+import com.gojek.mc2pinot.io.FsFactory;
+import com.gojek.mc2pinot.io.oss.OSSReader;
 import com.gojek.mc2pinot.mc.MCUnloader;
 import com.gojek.mc2pinot.mc.QueryUnloadBuilder;
-import com.gojek.mc2pinot.oss.OSSCleaner;
-import com.gojek.mc2pinot.oss.OSSReader;
-import com.gojek.mc2pinot.oss.OSSWriter;
 import com.gojek.mc2pinot.pinot.DefaultPinotClient;
 import com.gojek.mc2pinot.pinot.PinotClient;
 import com.gojek.mc2pinot.pinot.PinotSegmentUploader;
@@ -54,25 +53,25 @@ public class Main {
         Map<String, String> env = System.getenv();
 
         MaxcomputeConfig mcConfig = new MaxcomputeConfig(env);
-        OSSConfig ossConfig = new OSSConfig(env);
+        FsConfig fsConfig = new FsConfig(env);
         PinotConfig pinotConfig = new PinotConfig(env);
 
         String query = Files.readString(Paths.get(mcConfig.getQueryFilePath()), StandardCharsets.UTF_8);
 
-        OSS ossClient = buildOSSClient(ossConfig);
+        OSS mcOssClient = buildMcOssClient(mcConfig);
         try {
-            new OSSCleaner(ossClient).clean(ossConfig.getDestinationURI());
-
             Odps odpsClient = buildOdpsClient(mcConfig);
             MCUnloader mcUnloader = new MCUnloader(
                     odpsClient,
                     new QueryUnloadBuilder(),
-                    ossConfig.getRoleArn(),
+                    mcConfig.getOssRoleArn(),
                     pinotConfig.getInputFormat());
-            mcUnloader.unload(query, ossConfig.getDestinationURI());
+            mcUnloader.unload(query, mcConfig.getOssDestinationURI());
 
-            try (OSSReader ossReader = new OSSReader(ossClient, ossConfig.getDestinationURI())) {
-                OSSWriter ossWriter = new OSSWriter(ossClient, ossConfig.getDestinationURI());
+            try (OSSReader ossReader = new OSSReader(mcOssClient, mcConfig.getOssDestinationURI());
+                 FsFactory.FsComponents fs = FsFactory.create(fsConfig)) {
+
+                fs.cleaner().clean(fsConfig.getDestinationURI());
 
                 Schema schema = loadSchema(pinotConfig.getSchemaFilePath());
                 TableConfig tableConfig = loadTableConfig(pinotConfig.getTableConfigFilePath());
@@ -81,7 +80,7 @@ public class Main {
                         resolvePartitionFunctionName(tableConfig));
 
                 PinotSegmenter segmenter = new PinotSegmenter(
-                        ossReader, ossWriter, pinotConfig.getSegmentKey(),
+                        ossReader, fs.writer(), pinotConfig.getSegmentKey(),
                         pinotConfig.getInputFormat(), schema, tableConfig, partitionFunction);
 
                 List<SegmentInfo> segments = segmenter.generateSegment();
@@ -102,7 +101,7 @@ public class Main {
                 }
             }
         } finally {
-            ossClient.shutdown();
+            mcOssClient.shutdown();
         }
         LOG.info("success");
     }
@@ -115,11 +114,11 @@ public class Main {
         return odps;
     }
 
-    private static OSS buildOSSClient(OSSConfig config) {
+    private static OSS buildMcOssClient(MaxcomputeConfig config) {
         return new OSSClientBuilder().build(
-                config.getEndpoint(),
-                config.getAccessKeyId(),
-                config.getAccessKeySecret());
+                config.getOssEndpoint(),
+                config.getOssAccessKeyId(),
+                config.getOssAccessKeySecret());
     }
 
     private static Schema loadSchema(String filePath) throws Exception {
@@ -148,4 +147,3 @@ public class Main {
         return columnMap.values().iterator().next().getFunctionName();
     }
 }
-

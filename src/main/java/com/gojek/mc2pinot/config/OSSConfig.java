@@ -11,19 +11,15 @@ public class OSSConfig {
     private final String accessKeySecret;
     private final String endpoint;
     private final String region;
-    private final String destinationURI;
-    private final String roleArn;
 
     public OSSConfig(Map<String, String> env) {
-        String serviceAccount = ConfigHelper.requireNonEmpty(env, Constant.OSS_SERVICE_ACCOUNT);
-        this.destinationURI = ConfigHelper.requireNonEmpty(env, Constant.OSS_DESTINATION_URI);
-        this.roleArn = ConfigHelper.requireNonEmpty(env, Constant.OSS_ROLE_ARN);
+        String serviceAccount = ConfigHelper.requireNonEmpty(env, Constant.FS_OSS_SERVICE_ACCOUNT);
 
         JsonObject json = JsonParser.parseString(serviceAccount).getAsJsonObject();
-        this.accessKeyId = ConfigHelper.requireJsonField(json, Constant.OSS_SERVICE_ACCOUNT, "access_key_id");
-        this.accessKeySecret = ConfigHelper.requireJsonField(json, Constant.OSS_SERVICE_ACCOUNT, "access_key_secret");
-        this.endpoint = ConfigHelper.requireJsonField(json, Constant.OSS_SERVICE_ACCOUNT, "endpoint");
-        this.region = ConfigHelper.requireJsonField(json, Constant.OSS_SERVICE_ACCOUNT, "region");
+        this.accessKeyId = ConfigHelper.requireJsonField(json, Constant.FS_OSS_SERVICE_ACCOUNT, "access_key_id");
+        this.accessKeySecret = ConfigHelper.requireJsonField(json, Constant.FS_OSS_SERVICE_ACCOUNT, "access_key_secret");
+        this.endpoint = ConfigHelper.requireJsonField(json, Constant.FS_OSS_SERVICE_ACCOUNT, "endpoint");
+        this.region = ConfigHelper.requireJsonField(json, Constant.FS_OSS_SERVICE_ACCOUNT, "region");
     }
 
     public String getAccessKeyId() {
@@ -41,18 +37,4 @@ public class OSSConfig {
     public String getRegion() {
         return region;
     }
-
-    public String getDestinationURI() {
-        return destinationURI;
-    }
-
-    public String getRoleArn() {
-        return roleArn;
-    }
-
-    public String getSegmentOutputURI() {
-        String base = destinationURI.endsWith("/") ? destinationURI : destinationURI + "/";
-        return base + "segments";
-    }
 }
-
