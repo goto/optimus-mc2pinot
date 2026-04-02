@@ -15,7 +15,7 @@ class OSSConfigTest {
     @Test
     void shouldParseValidConfig() {
         Map<String, String> env = new HashMap<>();
-        env.put("FS__OSS_SERVICE_ACCOUNT", VALID_SERVICE_ACCOUNT);
+        env.put("PINOT__DEEP_STORAGE_OSS_SERVICE_ACCOUNT", VALID_SERVICE_ACCOUNT);
 
         OSSConfig config = new OSSConfig(env);
 
@@ -31,13 +31,13 @@ class OSSConfigTest {
 
         IllegalArgumentException ex = assertThrows(IllegalArgumentException.class,
                 () -> new OSSConfig(env));
-        assertTrue(ex.getMessage().contains("FS__OSS_SERVICE_ACCOUNT"));
+        assertTrue(ex.getMessage().contains("PINOT__DEEP_STORAGE_OSS_SERVICE_ACCOUNT"));
     }
 
     @Test
     void shouldThrowWhenAccessKeyIdMissing() {
         Map<String, String> env = new HashMap<>();
-        env.put("FS__OSS_SERVICE_ACCOUNT",
+        env.put("PINOT__DEEP_STORAGE_OSS_SERVICE_ACCOUNT",
                 """
                 {"access_key_secret":"s","endpoint":"e","region":"r"}""");
 
@@ -49,7 +49,7 @@ class OSSConfigTest {
     @Test
     void shouldThrowWhenEndpointMissing() {
         Map<String, String> env = new HashMap<>();
-        env.put("FS__OSS_SERVICE_ACCOUNT",
+        env.put("PINOT__DEEP_STORAGE_OSS_SERVICE_ACCOUNT",
                 """
                 {"access_key_id":"i","access_key_secret":"s","region":"r"}""");
 

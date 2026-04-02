@@ -21,7 +21,7 @@ public class OSSCleaner implements Cleaner {
 
     @Override
     public void clean(String destinationURI) throws IOException {
-        LOG.info("fs(oss): clean destination " + destinationURI);
+        LOG.info("transient(oss): clean destination " + destinationURI);
         URI uri = URI.create(destinationURI);
         String bucket = uri.getHost();
         String prefix = uri.getPath().substring(1);
@@ -43,7 +43,7 @@ public class OSSCleaner implements Cleaner {
             ObjectListing listing = ossClient.listObjects(request);
 
             if (listing.getObjectSummaries().isEmpty() && !listing.isTruncated()) {
-                LOG.info("fs(oss): destination is empty, nothing to clean");
+                LOG.info("transient(oss): destination is empty, nothing to clean");
                 return;
             }
 

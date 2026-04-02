@@ -9,6 +9,9 @@ import static org.junit.jupiter.api.Assertions.*;
 
 class PinotConfigTest {
 
+    private static final String VALID_OSS_SERVICE_ACCOUNT =
+            "{\"access_key_id\":\"akid\",\"access_key_secret\":\"aksecret\",\"endpoint\":\"https://oss.endpoint\",\"region\":\"ap-southeast-5\"}";
+
     @Test
     void shouldParseValidConfig() {
         Map<String, String> env = new HashMap<>();
@@ -25,6 +28,8 @@ class PinotConfigTest {
         assertEquals("parquet", config.getInputFormat());
         assertEquals("/path/to/schema.json", config.getSchemaFilePath());
         assertEquals("/path/to/tableConfig.json", config.getTableConfigFilePath());
+        assertNull(config.getDeepStorageURI());
+        assertNull(config.getDeepStorageOssConfig());
     }
 
     @Test
@@ -35,6 +40,38 @@ class PinotConfigTest {
         PinotConfig config = new PinotConfig(env);
 
         assertEquals("json", config.getInputFormat());
+    }
+
+    @Test
+    void shouldAcceptAbsentDeepStorageURI() {
+        PinotConfig config = new PinotConfig(buildValidEnv());
+
+        assertNull(config.getDeepStorageURI());
+        assertNull(config.getDeepStorageOssConfig());
+    }
+
+    @Test
+    void shouldAcceptLocalDeepStorageURI() {
+        Map<String, String> env = buildValidEnv();
+        env.put("PINOT__DEEP_STORAGE_URI", "file:///tmp/deep-storage");
+
+        PinotConfig config = new PinotConfig(env);
+
+        assertEquals("file:///tmp/deep-storage", config.getDeepStorageURI());
+        assertNull(config.getDeepStorageOssConfig());
+    }
+
+    @Test
+    void shouldWireOSSConfigWhenDeepStorageURIIsOSS() {
+        Map<String, String> env = buildValidEnv();
+        env.put("PINOT__DEEP_STORAGE_URI", "oss://my-bucket/deep-storage");
+        env.put("PINOT__DEEP_STORAGE_OSS_SERVICE_ACCOUNT", VALID_OSS_SERVICE_ACCOUNT);
+
+        PinotConfig config = new PinotConfig(env);
+
+        assertEquals("oss://my-bucket/deep-storage", config.getDeepStorageURI());
+        assertNotNull(config.getDeepStorageOssConfig());
+        assertEquals("akid", config.getDeepStorageOssConfig().getAccessKeyId());
     }
 
     @Test
@@ -77,4 +114,3 @@ class PinotConfigTest {
         return env;
     }
 }
-

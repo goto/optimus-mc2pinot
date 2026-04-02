@@ -13,13 +13,13 @@ public class OSSConfig {
     private final String region;
 
     public OSSConfig(Map<String, String> env) {
-        String serviceAccount = ConfigHelper.requireNonEmpty(env, Constant.FS_OSS_SERVICE_ACCOUNT);
+        String serviceAccount = ConfigHelper.requireNonEmpty(env, Constant.PINOT_DEEP_STORAGE_OSS_SERVICE_ACCOUNT);
 
         JsonObject json = JsonParser.parseString(serviceAccount).getAsJsonObject();
-        this.accessKeyId = ConfigHelper.requireJsonField(json, Constant.FS_OSS_SERVICE_ACCOUNT, "access_key_id");
-        this.accessKeySecret = ConfigHelper.requireJsonField(json, Constant.FS_OSS_SERVICE_ACCOUNT, "access_key_secret");
-        this.endpoint = ConfigHelper.requireJsonField(json, Constant.FS_OSS_SERVICE_ACCOUNT, "endpoint");
-        this.region = ConfigHelper.requireJsonField(json, Constant.FS_OSS_SERVICE_ACCOUNT, "region");
+        this.accessKeyId = ConfigHelper.requireJsonField(json, Constant.PINOT_DEEP_STORAGE_OSS_SERVICE_ACCOUNT, "access_key_id");
+        this.accessKeySecret = ConfigHelper.requireJsonField(json, Constant.PINOT_DEEP_STORAGE_OSS_SERVICE_ACCOUNT, "access_key_secret");
+        this.endpoint = ConfigHelper.requireJsonField(json, Constant.PINOT_DEEP_STORAGE_OSS_SERVICE_ACCOUNT, "endpoint");
+        this.region = ConfigHelper.requireJsonField(json, Constant.PINOT_DEEP_STORAGE_OSS_SERVICE_ACCOUNT, "region");
     }
 
     public String getAccessKeyId() {

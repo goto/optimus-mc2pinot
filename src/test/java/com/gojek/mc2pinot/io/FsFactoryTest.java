@@ -1,6 +1,6 @@
 package com.gojek.mc2pinot.io;
 
-import com.gojek.mc2pinot.config.FsConfig;
+import com.gojek.mc2pinot.config.PinotConfig;
 import com.gojek.mc2pinot.io.local.LocalCleaner;
 import com.gojek.mc2pinot.io.local.LocalWriter;
 import org.junit.jupiter.api.Test;
@@ -18,12 +18,24 @@ class FsFactoryTest {
     Path tempDir;
 
     @Test
-    void shouldCreateLocalComponentsForFileScheme() {
-        Map<String, String> env = new HashMap<>();
-        env.put("FS__DESTINATION_URI", tempDir.toUri().toString());
+    void shouldCreateLocalComponentsWhenDeepStorageURIAbsent() {
+        PinotConfig config = buildPinotConfig(null);
+        String segmentFolderURI = tempDir.toUri().toString();
 
-        FsConfig config = new FsConfig(env);
-        FsFactory.FsComponents components = FsFactory.create(config);
+        FsFactory.FsComponents components = FsFactory.create(config, segmentFolderURI);
+
+        assertNotNull(components.writer());
+        assertNotNull(components.cleaner());
+        assertInstanceOf(LocalWriter.class, components.writer());
+        assertInstanceOf(LocalCleaner.class, components.cleaner());
+    }
+
+    @Test
+    void shouldCreateLocalComponentsForFileScheme() {
+        PinotConfig config = buildPinotConfig("file:///tmp/deep-storage");
+        String segmentFolderURI = tempDir.toUri().toString();
+
+        FsFactory.FsComponents components = FsFactory.create(config, segmentFolderURI);
 
         assertNotNull(components.writer());
         assertNotNull(components.cleaner());
@@ -33,39 +45,38 @@ class FsFactoryTest {
 
     @Test
     void shouldThrowForS3Scheme() {
-        Map<String, String> env = new HashMap<>();
-        env.put("FS__DESTINATION_URI", "s3://my-bucket/path");
+        PinotConfig config = buildPinotConfig("s3://my-bucket/deep-storage");
 
-        FsConfig config = new FsConfig(env);
-
-        assertThrows(UnsupportedOperationException.class, () -> FsFactory.create(config));
+        assertThrows(UnsupportedOperationException.class,
+                () -> FsFactory.create(config, "s3://my-bucket/deep-storage/my_table/segments_123"));
     }
 
     @Test
     void shouldThrowForGCSScheme() {
-        Map<String, String> env = new HashMap<>();
-        env.put("FS__DESTINATION_URI", "gs://my-bucket/path");
+        PinotConfig config = buildPinotConfig("gs://my-bucket/deep-storage");
 
-        FsConfig config = new FsConfig(env);
-
-        assertThrows(UnsupportedOperationException.class, () -> FsFactory.create(config));
+        assertThrows(UnsupportedOperationException.class,
+                () -> FsFactory.create(config, "gs://my-bucket/deep-storage/my_table/segments_123"));
     }
 
     @Test
     void shouldThrowForUnknownScheme() {
-        Map<String, String> env = new HashMap<>();
-        env.put("FS__DESTINATION_URI", "ftp://my-server/path");
+        PinotConfig config = buildPinotConfig("ftp://my-server/deep-storage");
 
-        FsConfig config = new FsConfig(env);
-
-        assertThrows(IllegalArgumentException.class, () -> FsFactory.create(config));
+        assertThrows(IllegalArgumentException.class,
+                () -> FsFactory.create(config, "ftp://my-server/deep-storage/my_table/segments_123"));
     }
 
-    @Test
-    void shouldThrowWhenDestinationURIMissing() {
+    private PinotConfig buildPinotConfig(String deepStorageURI) {
         Map<String, String> env = new HashMap<>();
-
-        assertThrows(IllegalArgumentException.class, () -> new FsConfig(env));
+        env.put("PINOT__HOST", "http://localhost:9000");
+        env.put("PINOT__SEGMENT_KEY", "123");
+        env.put("PINOT__INPUT_FORMAT", "json");
+        env.put("PINOT__SCHEMA_FILE_PATH", "/path/to/schema.json");
+        env.put("PINOT__TABLE_CONFIG_FILE_PATH", "/path/to/tableConfig.json");
+        if (deepStorageURI != null) {
+            env.put("PINOT__DEEP_STORAGE_URI", deepStorageURI);
+        }
+        return new PinotConfig(env);
     }
 }
-

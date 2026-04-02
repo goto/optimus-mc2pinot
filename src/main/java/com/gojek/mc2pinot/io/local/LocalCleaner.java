@@ -20,11 +20,11 @@ public class LocalCleaner implements Cleaner {
         Path dir = Paths.get(pathStr);
 
         if (!Files.exists(dir)) {
-            LOG.info("fs(local): destination does not exist, nothing to clean: " + dir);
+            LOG.info("transient(local): destination does not exist, nothing to clean: " + dir);
             return;
         }
 
-        LOG.info("fs(local): clean destination " + dir);
+        LOG.info("transient(local): clean destination " + dir);
         deleteRecursively(dir);
         Files.createDirectories(dir);
     }
