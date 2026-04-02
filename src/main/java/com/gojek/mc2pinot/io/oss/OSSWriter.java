@@ -26,7 +26,7 @@ public class OSSWriter implements Writer {
             basePath = basePath + "/";
         }
 
-        String fullKey = basePath + "segments/" + objectKey;
+        String fullKey = basePath + objectKey;
 
         ossClient.putObject(bucket, fullKey, localFile.toFile());
 

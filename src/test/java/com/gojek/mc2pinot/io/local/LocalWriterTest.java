@@ -18,35 +18,33 @@ class LocalWriterTest {
     Path sourceDir;
 
     @Test
-    void shouldCopyFileToSegmentsSubdirectory() throws IOException {
+    void shouldCopyFileToDestinationDirectory() throws IOException {
         Path sourceFile = sourceDir.resolve("segment.tar.gz");
         Files.writeString(sourceFile, "segment-data");
 
         LocalWriter writer = new LocalWriter(tempDir.toUri().toString());
         String resultURI = writer.write("segment.tar.gz", sourceFile);
 
-        Path expectedTarget = tempDir.resolve("segments").resolve("segment.tar.gz");
+        Path expectedTarget = tempDir.resolve("segment.tar.gz");
         assertTrue(Files.exists(expectedTarget));
         assertEquals("segment-data", Files.readString(expectedTarget));
-        assertTrue(resultURI.endsWith("segments/segment.tar.gz"));
+        assertTrue(resultURI.endsWith("segment.tar.gz"));
     }
 
     @Test
-    void shouldCreateSegmentsDirectoryIfAbsent() throws IOException {
+    void shouldCreateDestinationDirectoryIfAbsent() throws IOException {
         Path sourceFile = sourceDir.resolve("seg.tar.gz");
         Files.writeString(sourceFile, "data");
 
         LocalWriter writer = new LocalWriter(tempDir.resolve("output").toUri().toString());
         writer.write("seg.tar.gz", sourceFile);
 
-        assertTrue(Files.isDirectory(tempDir.resolve("output").resolve("segments")));
+        assertTrue(Files.isDirectory(tempDir.resolve("output")));
     }
 
     @Test
     void shouldOverwriteExistingFile() throws IOException {
-        Path segmentsDir = tempDir.resolve("segments");
-        Files.createDirectories(segmentsDir);
-        Files.writeString(segmentsDir.resolve("seg.tar.gz"), "old-data");
+        Files.writeString(tempDir.resolve("seg.tar.gz"), "old-data");
 
         Path sourceFile = sourceDir.resolve("seg.tar.gz");
         Files.writeString(sourceFile, "new-data");
@@ -54,7 +52,7 @@ class LocalWriterTest {
         LocalWriter writer = new LocalWriter(tempDir.toUri().toString());
         writer.write("seg.tar.gz", sourceFile);
 
-        assertEquals("new-data", Files.readString(segmentsDir.resolve("seg.tar.gz")));
+        assertEquals("new-data", Files.readString(tempDir.resolve("seg.tar.gz")));
     }
 }
 

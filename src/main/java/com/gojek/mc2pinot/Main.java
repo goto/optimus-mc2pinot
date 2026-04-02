@@ -13,6 +13,7 @@ import com.gojek.mc2pinot.core.SegmentInfo;
 import com.gojek.mc2pinot.core.partition.PartitionFunction;
 import com.gojek.mc2pinot.core.partition.PartitionFunctionFactory;
 import com.gojek.mc2pinot.io.FsFactory;
+import com.gojek.mc2pinot.io.oss.OSSCleaner;
 import com.gojek.mc2pinot.io.oss.OSSReader;
 import com.gojek.mc2pinot.mc.MCUnloader;
 import com.gojek.mc2pinot.mc.QueryUnloadBuilder;
@@ -66,6 +67,8 @@ public class Main {
                     new QueryUnloadBuilder(),
                     mcConfig.getOssRoleArn(),
                     pinotConfig.getInputFormat());
+
+            new OSSCleaner(mcOssClient).clean(mcConfig.getOssDestinationURI());
             mcUnloader.unload(query, mcConfig.getOssDestinationURI());
 
             try (OSSReader ossReader = new OSSReader(mcOssClient, mcConfig.getOssDestinationURI());

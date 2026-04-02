@@ -30,7 +30,7 @@ class OSSWriterTest {
 
     @BeforeEach
     void setUp() {
-        ossWriter = new OSSWriter(ossClient, "oss://my-bucket/data/prefix");
+        ossWriter = new OSSWriter(ossClient, "oss://my-bucket/data/prefix/segments");
     }
 
     @Test
@@ -55,7 +55,7 @@ class OSSWriterTest {
 
     @Test
     void shouldHandleTrailingSlashInURI() throws IOException {
-        ossWriter = new OSSWriter(ossClient, "oss://my-bucket/data/prefix/");
+        ossWriter = new OSSWriter(ossClient, "oss://my-bucket/data/prefix/segments/");
 
         Path localFile = tempDir.resolve("seg.tar.gz");
         Files.writeString(localFile, "data");

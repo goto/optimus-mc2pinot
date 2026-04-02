@@ -54,7 +54,7 @@ public class OSSReader implements Reader {
 
             for (OSSObjectSummary summary : listing.getObjectSummaries()) {
                 String key = summary.getKey();
-                if (key.endsWith("/") || key.startsWith(prefix + "segments/")) {
+                if (key.endsWith("/")) {
                     continue;
                 }
 

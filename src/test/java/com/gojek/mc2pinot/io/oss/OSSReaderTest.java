@@ -121,26 +121,5 @@ class OSSReaderTest {
         assertFalse(Files.exists(downloadedFile));
     }
 
-    @Test
-    void shouldSkipSegmentsSubdirectory() throws IOException {
-        OSSObjectSummary dataSummary = new OSSObjectSummary();
-        dataSummary.setKey("data/prefix/part-00000.parquet");
-
-        OSSObjectSummary segmentSummary = new OSSObjectSummary();
-        segmentSummary.setKey("data/prefix/segments/table_0.tar.gz");
-
-        when(objectListing.getObjectSummaries()).thenReturn(List.of(dataSummary, segmentSummary));
-        when(objectListing.isTruncated()).thenReturn(false);
-        when(ossClient.listObjects(any(ListObjectsRequest.class))).thenReturn(objectListing);
-
-        byte[] content = "data".getBytes(StandardCharsets.UTF_8);
-        when(ossObject.getObjectContent()).thenReturn(new ByteArrayInputStream(content));
-        when(ossClient.getObject("my-bucket", "data/prefix/part-00000.parquet")).thenReturn(ossObject);
-
-        List<Path> files = ossReader.read();
-
-        assertEquals(1, files.size());
-        assertTrue(files.get(0).getFileName().toString().endsWith(".parquet"));
-    }
 }
 

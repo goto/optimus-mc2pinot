@@ -21,10 +21,9 @@ public class LocalWriter implements Writer {
 
     @Override
     public String write(String objectKey, Path localFile) throws IOException {
-        Path segmentsDir = destinationDir.resolve("segments");
-        Files.createDirectories(segmentsDir);
+        Files.createDirectories(destinationDir);
 
-        Path target = segmentsDir.resolve(objectKey);
+        Path target = destinationDir.resolve(objectKey);
         Files.copy(localFile, target, StandardCopyOption.REPLACE_EXISTING);
 
         return target.toUri().toString();
