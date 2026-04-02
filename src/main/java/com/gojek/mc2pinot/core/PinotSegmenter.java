@@ -76,9 +76,9 @@ public class PinotSegmenter {
                 File tarFile = buildSegment(partitionFile, segmentName, outputDir);
 
                 LOG.info("transient(oss): upload result segment " + segmentName);
-                String ossURI = writer.write(segmentName + ".tar.gz", tarFile.toPath());
+                String remoteURI = writer.write(segmentName + ".tar.gz", tarFile.toPath());
 
-                results.add(new SegmentInfo(segmentName, ossURI, tarFile.toPath()));
+                results.add(new SegmentInfo(segmentName, remoteURI, tarFile.toPath()));
             }
         } catch (Exception e) {
             deleteDirectory(outputDir.toFile());

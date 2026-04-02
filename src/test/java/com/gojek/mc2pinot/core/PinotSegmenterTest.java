@@ -63,8 +63,8 @@ class PinotSegmenterTest {
 
         assertEquals(1, result.size());
         assertEquals("test_table_OFFLINE_12345_0", result.get(0).segmentName());
-        assertTrue(result.get(0).ossURI().startsWith("oss://bucket/segments/"));
-        assertTrue(result.get(0).ossURI().endsWith(".tar.gz"));
+        assertTrue(result.get(0).remoteURI().startsWith("oss://bucket/segments/"));
+        assertTrue(result.get(0).remoteURI().endsWith(".tar.gz"));
         assertNotNull(result.get(0).localPath());
         assertTrue(Files.exists(result.get(0).localPath()));
 

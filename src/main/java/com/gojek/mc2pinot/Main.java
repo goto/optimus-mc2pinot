@@ -6,17 +6,16 @@ import com.aliyun.odps.account.AliyunAccount;
 import com.aliyun.oss.OSS;
 import com.aliyun.oss.OSSClientBuilder;
 import com.gojek.mc2pinot.config.MaxcomputeConfig;
-import com.gojek.mc2pinot.config.OSSConfig;
 import com.gojek.mc2pinot.config.PinotConfig;
 import com.gojek.mc2pinot.core.PinotSegmenter;
 import com.gojek.mc2pinot.core.SegmentInfo;
 import com.gojek.mc2pinot.core.partition.PartitionFunction;
 import com.gojek.mc2pinot.core.partition.PartitionFunctionFactory;
+import com.gojek.mc2pinot.io.FsFactory;
+import com.gojek.mc2pinot.io.oss.OSSCleaner;
+import com.gojek.mc2pinot.io.oss.OSSReader;
 import com.gojek.mc2pinot.mc.MCUnloader;
 import com.gojek.mc2pinot.mc.QueryUnloadBuilder;
-import com.gojek.mc2pinot.oss.OSSCleaner;
-import com.gojek.mc2pinot.oss.OSSReader;
-import com.gojek.mc2pinot.oss.OSSWriter;
 import com.gojek.mc2pinot.pinot.DefaultPinotClient;
 import com.gojek.mc2pinot.pinot.PinotClient;
 import com.gojek.mc2pinot.pinot.PinotSegmentUploader;
@@ -54,34 +53,39 @@ public class Main {
         Map<String, String> env = System.getenv();
 
         MaxcomputeConfig mcConfig = new MaxcomputeConfig(env);
-        OSSConfig ossConfig = new OSSConfig(env);
         PinotConfig pinotConfig = new PinotConfig(env);
 
         String query = Files.readString(Paths.get(mcConfig.getQueryFilePath()), StandardCharsets.UTF_8);
 
-        OSS ossClient = buildOSSClient(ossConfig);
+        OSS mcOssClient = buildMcOssClient(mcConfig);
         try {
-            new OSSCleaner(ossClient).clean(ossConfig.getDestinationURI());
-
             Odps odpsClient = buildOdpsClient(mcConfig);
             MCUnloader mcUnloader = new MCUnloader(
                     odpsClient,
                     new QueryUnloadBuilder(),
-                    ossConfig.getRoleArn(),
+                    mcConfig.getOssRoleArn(),
                     pinotConfig.getInputFormat());
-            mcUnloader.unload(query, ossConfig.getDestinationURI());
 
-            try (OSSReader ossReader = new OSSReader(ossClient, ossConfig.getDestinationURI())) {
-                OSSWriter ossWriter = new OSSWriter(ossClient, ossConfig.getDestinationURI());
+            new OSSCleaner(mcOssClient).clean(mcConfig.getOssDestinationURI());
+            mcUnloader.unload(query, mcConfig.getOssDestinationURI());
 
-                Schema schema = loadSchema(pinotConfig.getSchemaFilePath());
-                TableConfig tableConfig = loadTableConfig(pinotConfig.getTableConfigFilePath());
+            Schema schema = loadSchema(pinotConfig.getSchemaFilePath());
+            TableConfig tableConfig = loadTableConfig(pinotConfig.getTableConfigFilePath());
+            String tableName = tableConfig.getTableName();
 
-                PartitionFunction partitionFunction = PartitionFunctionFactory.create(
-                        resolvePartitionFunctionName(tableConfig));
+            String segmentFolderURI = buildSegmentFolderURI(
+                    pinotConfig.getDeepStorageURI(), tableName, pinotConfig.getSegmentKey());
+
+            PartitionFunction partitionFunction = PartitionFunctionFactory.create(
+                    resolvePartitionFunctionName(tableConfig));
+
+            try (OSSReader ossReader = new OSSReader(mcOssClient, mcConfig.getOssDestinationURI());
+                 FsFactory.FsComponents fs = FsFactory.create(pinotConfig, segmentFolderURI)) {
+
+                fs.cleaner().clean(segmentFolderURI);
 
                 PinotSegmenter segmenter = new PinotSegmenter(
-                        ossReader, ossWriter, pinotConfig.getSegmentKey(),
+                        ossReader, fs.writer(), pinotConfig.getSegmentKey(),
                         pinotConfig.getInputFormat(), schema, tableConfig, partitionFunction);
 
                 List<SegmentInfo> segments = segmenter.generateSegment();
@@ -92,7 +96,7 @@ public class Main {
                 PinotClient pinotClient = new DefaultPinotClient(pinotConfig.getHost(), httpClient);
                 PinotSegmentUploader uploader = new PinotSegmentUploader(pinotClient);
                 try {
-                    uploader.upload(segments, tableConfig.getTableName());
+                    uploader.upload(segments, tableName);
                 } finally {
                     for (SegmentInfo seg : segments) {
                         if (seg.localPath() != null) {
@@ -100,11 +104,22 @@ public class Main {
                         }
                     }
                 }
+
+                fs.cleaner().clean(segmentFolderURI);
             }
         } finally {
-            ossClient.shutdown();
+            mcOssClient.shutdown();
         }
         LOG.info("success");
+    }
+
+    private static String buildSegmentFolderURI(String deepStorageURI, String tableName, String segmentKey) {
+        String base = (deepStorageURI == null || deepStorageURI.isBlank())
+                ? "file:///tmp/mc2pinot"
+                : deepStorageURI.endsWith("/")
+                ? deepStorageURI.substring(0, deepStorageURI.length() - 1)
+                : deepStorageURI;
+        return base + "/" + tableName + "/segments_" + segmentKey;
     }
 
     private static Odps buildOdpsClient(MaxcomputeConfig config) {
@@ -115,11 +130,11 @@ public class Main {
         return odps;
     }
 
-    private static OSS buildOSSClient(OSSConfig config) {
+    private static OSS buildMcOssClient(MaxcomputeConfig config) {
         return new OSSClientBuilder().build(
-                config.getEndpoint(),
-                config.getAccessKeyId(),
-                config.getAccessKeySecret());
+                config.getOssEndpoint(),
+                config.getOssAccessKeyId(),
+                config.getOssAccessKeySecret());
     }
 
     private static Schema loadSchema(String filePath) throws Exception {
@@ -148,4 +163,3 @@ public class Main {
         return columnMap.values().iterator().next().getFunctionName();
     }
 }
-

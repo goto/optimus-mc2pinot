@@ -15,9 +15,7 @@ class OSSConfigTest {
     @Test
     void shouldParseValidConfig() {
         Map<String, String> env = new HashMap<>();
-        env.put("OSS__SERVICE_ACCOUNT", VALID_SERVICE_ACCOUNT);
-        env.put("OSS__DESTINATION_URI", "oss://bucket/path/to/data");
-        env.put("OSS__ROLE_ARN", "acs:ram::123456:role/myrole");
+        env.put("PINOT__DEEP_STORAGE_OSS_SERVICE_ACCOUNT", VALID_SERVICE_ACCOUNT);
 
         OSSConfig config = new OSSConfig(env);
 
@@ -25,65 +23,38 @@ class OSSConfigTest {
         assertEquals("aksecret", config.getAccessKeySecret());
         assertEquals("https://oss.endpoint", config.getEndpoint());
         assertEquals("ap-southeast-5", config.getRegion());
-        assertEquals("oss://bucket/path/to/data", config.getDestinationURI());
-        assertEquals("acs:ram::123456:role/myrole", config.getRoleArn());
-    }
-
-    @Test
-    void shouldAppendSegmentsSuffix() {
-        Map<String, String> env = new HashMap<>();
-        env.put("OSS__SERVICE_ACCOUNT", VALID_SERVICE_ACCOUNT);
-        env.put("OSS__DESTINATION_URI", "oss://bucket/path/to/data");
-        env.put("OSS__ROLE_ARN", "acs:ram::123456:role/myrole");
-
-        OSSConfig config = new OSSConfig(env);
-
-        assertEquals("oss://bucket/path/to/data/segments", config.getSegmentOutputURI());
-    }
-
-    @Test
-    void shouldAppendSegmentsSuffixWithTrailingSlash() {
-        Map<String, String> env = new HashMap<>();
-        env.put("OSS__SERVICE_ACCOUNT", VALID_SERVICE_ACCOUNT);
-        env.put("OSS__DESTINATION_URI", "oss://bucket/path/to/data/");
-        env.put("OSS__ROLE_ARN", "acs:ram::123456:role/myrole");
-
-        OSSConfig config = new OSSConfig(env);
-
-        assertEquals("oss://bucket/path/to/data/segments", config.getSegmentOutputURI());
     }
 
     @Test
     void shouldThrowWhenServiceAccountMissing() {
         Map<String, String> env = new HashMap<>();
-        env.put("OSS__DESTINATION_URI", "oss://bucket/path");
-        env.put("OSS__ROLE_ARN", "acs:ram::123456:role/myrole");
 
         IllegalArgumentException ex = assertThrows(IllegalArgumentException.class,
                 () -> new OSSConfig(env));
-        assertTrue(ex.getMessage().contains("OSS__SERVICE_ACCOUNT"));
+        assertTrue(ex.getMessage().contains("PINOT__DEEP_STORAGE_OSS_SERVICE_ACCOUNT"));
     }
 
     @Test
-    void shouldThrowWhenDestinationURIMissing() {
+    void shouldThrowWhenAccessKeyIdMissing() {
         Map<String, String> env = new HashMap<>();
-        env.put("OSS__SERVICE_ACCOUNT", VALID_SERVICE_ACCOUNT);
-        env.put("OSS__ROLE_ARN", "acs:ram::123456:role/myrole");
+        env.put("PINOT__DEEP_STORAGE_OSS_SERVICE_ACCOUNT",
+                """
+                {"access_key_secret":"s","endpoint":"e","region":"r"}""");
 
         IllegalArgumentException ex = assertThrows(IllegalArgumentException.class,
                 () -> new OSSConfig(env));
-        assertTrue(ex.getMessage().contains("OSS__DESTINATION_URI"));
+        assertTrue(ex.getMessage().contains("access_key_id"));
     }
 
     @Test
-    void shouldThrowWhenRoleArnMissing() {
+    void shouldThrowWhenEndpointMissing() {
         Map<String, String> env = new HashMap<>();
-        env.put("OSS__SERVICE_ACCOUNT", VALID_SERVICE_ACCOUNT);
-        env.put("OSS__DESTINATION_URI", "oss://bucket/path");
+        env.put("PINOT__DEEP_STORAGE_OSS_SERVICE_ACCOUNT",
+                """
+                {"access_key_id":"i","access_key_secret":"s","region":"r"}""");
 
         IllegalArgumentException ex = assertThrows(IllegalArgumentException.class,
                 () -> new OSSConfig(env));
-        assertTrue(ex.getMessage().contains("OSS__ROLE_ARN"));
+        assertTrue(ex.getMessage().contains("endpoint"));
     }
 }
-
