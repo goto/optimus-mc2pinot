@@ -60,6 +60,7 @@ public class PinotSegmenter {
     public List<SegmentInfo> generateSegment() throws Exception {
         String tableName = tableConfig.getTableName();
         PartitionSpec partitionSpec = extractPartitionSpec();
+        LOG.info("transient(core): start generating " + partitionSpec.count + " segments...");
 
         List<Path> dataFiles = reader.read();
         Path outputDir = Files.createTempDirectory("segment-output-");
