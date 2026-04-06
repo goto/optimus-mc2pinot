@@ -1,36 +1,28 @@
 package com.gojek.mc2pinot.core;
 
-import com.google.gson.JsonObject;
 import com.gojek.mc2pinot.core.partition.PartitionFunction;
+import com.gojek.mc2pinot.core.reader.PartitionFilteringRecordReader;
 import com.gojek.mc2pinot.io.Reader;
 import com.gojek.mc2pinot.io.Writer;
 import org.apache.commons.compress.archivers.tar.TarArchiveEntry;
 import org.apache.commons.compress.archivers.tar.TarArchiveOutputStream;
 import org.apache.commons.compress.compressors.gzip.GzipCompressorOutputStream;
-import org.apache.pinot.plugin.inputformat.avro.AvroRecordReader;
-import org.apache.pinot.plugin.inputformat.json.JSONRecordReader;
-import org.apache.pinot.plugin.inputformat.parquet.ParquetRecordReader;
 import org.apache.pinot.segment.local.segment.creator.impl.SegmentIndexCreationDriverImpl;
 import org.apache.pinot.segment.spi.creator.SegmentGeneratorConfig;
 import org.apache.pinot.spi.config.table.ColumnPartitionConfig;
 import org.apache.pinot.spi.config.table.SegmentPartitionConfig;
 import org.apache.pinot.spi.config.table.TableConfig;
 import org.apache.pinot.spi.data.Schema;
-import org.apache.pinot.spi.data.readers.FileFormat;
-import org.apache.pinot.spi.data.readers.GenericRow;
 import org.apache.pinot.spi.data.readers.RecordReader;
 
 import java.io.BufferedOutputStream;
-import java.io.BufferedWriter;
 import java.io.File;
 import java.io.FileOutputStream;
-import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
-import java.util.Set;
 import java.util.logging.Logger;
 
 public class PinotSegmenter {
@@ -67,23 +59,27 @@ public class PinotSegmenter {
         List<SegmentInfo> results = new ArrayList<>();
 
         try {
-            List<Path> partitionFiles = partitionData(dataFiles, partitionSpec);
-
-            for (int i = 0; i < partitionFiles.size(); i++) {
-                Path partitionFile = partitionFiles.get(i);
+            for (int i = 0; i < partitionSpec.count; i++) {
                 String segmentName = tableName + "_" + segmentKey + "_" + i;
-
                 LOG.info("transient(core): create segment for segment " + segmentName);
-                File tarFile = buildSegment(partitionFile, segmentName, outputDir);
 
-                LOG.info("transient(oss): upload result segment " + segmentName);
-                String remoteURI = writer.write(segmentName + ".tar.gz", tarFile.toPath());
+                try (PartitionFilteringRecordReader filterReader = new PartitionFilteringRecordReader(
+                        dataFiles, inputFormat, schema.getPhysicalColumnNames(),
+                        i, partitionSpec.count, partitionSpec.column, partitionFunction)) {
 
-                results.add(new SegmentInfo(segmentName, remoteURI, tarFile.toPath()));
+                    File tarFile = buildSegment(filterReader, segmentName, outputDir);
+                    LOG.info("transient(oss): upload result segment " + segmentName);
+                    String remoteURI = writer.write(segmentName + ".tar.gz", tarFile.toPath());
+                    results.add(new SegmentInfo(segmentName, remoteURI, tarFile.toPath()));
+                }
             }
         } catch (Exception e) {
             deleteDirectory(outputDir.toFile());
             throw e;
+        } finally {
+            for (Path dataFile : dataFiles) {
+                Files.deleteIfExists(dataFile);
+            }
         }
 
         return results;
@@ -108,61 +104,14 @@ public class PinotSegmenter {
         return new PartitionSpec(partitionColumn, numPartitions);
     }
 
-    private List<Path> partitionData(List<Path> dataFiles, PartitionSpec spec) throws Exception {
-        Set<String> columns = schema.getPhysicalColumnNames();
-        List<Path> tempFiles = new ArrayList<>();
-        List<BufferedWriter> writers = new ArrayList<>();
-
-        try {
-            for (int i = 0; i < spec.count; i++) {
-                Path tempFile = Files.createTempFile("partition_" + i + "_", ".json");
-                tempFiles.add(tempFile);
-                writers.add(Files.newBufferedWriter(tempFile, StandardCharsets.UTF_8));
-            }
-
-            for (Path dataFile : dataFiles) {
-                try (RecordReader recordReader = createRecordReader(dataFile, columns)) {
-                    GenericRow reusableRow = new GenericRow();
-                    while (recordReader.hasNext()) {
-                        reusableRow = recordReader.next(reusableRow);
-
-                        int partitionId = 0;
-                        if (spec.column != null && spec.count > 1) {
-                            Object partValue = reusableRow.getValue(spec.column);
-                            String partStr = partValue != null ? partValue.toString() : "";
-                            partitionId = partitionFunction.partition(partStr, spec.count);
-                        }
-
-                        writeRowAsJson(reusableRow, columns, writers.get(partitionId));
-                        reusableRow.clear();
-                    }
-                }
-            }
-        } finally {
-            for (BufferedWriter bw : writers) {
-                bw.close();
-            }
-        }
-
-        return tempFiles;
-    }
-
-    private File buildSegment(Path partitionFile, String segmentName, Path outputDir) throws Exception {
+    private File buildSegment(RecordReader recordReader, String segmentName, Path outputDir) throws Exception {
         SegmentGeneratorConfig config = new SegmentGeneratorConfig(tableConfig, schema);
-        config.setInputFilePath(partitionFile.toAbsolutePath().toString());
-        config.setFormat(FileFormat.JSON);
         config.setOutDir(outputDir.toAbsolutePath().toString());
         config.setSegmentName(segmentName);
-
-        Set<String> columns = schema.getPhysicalColumnNames();
-        RecordReader recordReader = new JSONRecordReader();
-        recordReader.init(partitionFile.toAbsolutePath().toFile(), columns, null);
 
         SegmentIndexCreationDriverImpl driver = new SegmentIndexCreationDriverImpl();
         driver.init(config, recordReader);
         driver.build();
-
-        Files.deleteIfExists(partitionFile);
 
         File segmentDir = outputDir.resolve(segmentName).toFile();
         File tarFile = outputDir.resolve(segmentName + ".tar.gz").toFile();
@@ -202,36 +151,6 @@ public class PinotSegmenter {
         }
     }
 
-    private RecordReader createRecordReader(Path inputPath, Set<String> columns) throws Exception {
-        File file = inputPath.toAbsolutePath().toFile();
-        RecordReader recordReader = switch (inputFormat) {
-            case "parquet" -> new ParquetRecordReader();
-            case "avro" -> new AvroRecordReader();
-            default -> new JSONRecordReader();
-        };
-        recordReader.init(file, columns, null);
-        return recordReader;
-    }
-
-    private void writeRowAsJson(GenericRow row, Set<String> columns, BufferedWriter bw) throws Exception {
-        JsonObject json = new JsonObject();
-        for (String col : columns) {
-            Object value = row.getValue(col);
-            if (value == null) {
-                continue;
-            }
-            if (value instanceof Number number) {
-                json.addProperty(col, number);
-            } else if (value instanceof Boolean bool) {
-                json.addProperty(col, bool);
-            } else {
-                json.addProperty(col, value.toString());
-            }
-        }
-        bw.write(json.toString());
-        bw.newLine();
-    }
-
     private void deleteDirectory(File dir) {
         File[] files = dir.listFiles();
         if (files != null) {
@@ -249,7 +168,3 @@ public class PinotSegmenter {
     private record PartitionSpec(String column, int count) {
     }
 }
-
-
-
-
