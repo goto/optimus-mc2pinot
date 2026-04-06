@@ -16,6 +16,8 @@ WORKDIR /app
 COPY --from=builder /build/target/app.jar /app/app.jar
 
 ENTRYPOINT ["java", \
+    "-XX:+UseG1GC", \
+    "-XX:MaxRAMPercentage=75", \
     "--add-exports=java.base/sun.nio.ch=ALL-UNNAMED", \
     "--add-exports=jdk.unsupported/sun.misc=ALL-UNNAMED", \
     "--add-opens=java.base/java.lang.reflect=ALL-UNNAMED", \
