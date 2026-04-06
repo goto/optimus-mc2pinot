@@ -10,14 +10,15 @@ import java.nio.file.Path;
 
 public class OSSWriter implements Writer {
     private static final long PART_SIZE = 100 * 1024 * 1024L; // 100 MB
-    private static final int TASK_NUM = 5;
 
     private final OSS ossClient;
     private final String ossURI;
+    private final int writerTaskNumber;
 
-    public OSSWriter(OSS ossClient, String ossURI) {
+    public OSSWriter(OSS ossClient, String ossURI, int writerTaskNumber) {
         this.ossClient = ossClient;
         this.ossURI = ossURI;
+        this.writerTaskNumber = writerTaskNumber;
     }
 
     @Override
@@ -34,7 +35,7 @@ public class OSSWriter implements Writer {
         UploadFileRequest uploadRequest = new UploadFileRequest(bucket, fullKey);
         uploadRequest.setUploadFile(localFile.toAbsolutePath().toString());
         uploadRequest.setPartSize(PART_SIZE);
-        uploadRequest.setTaskNum(TASK_NUM);
+        uploadRequest.setTaskNum(this.writerTaskNumber);
         uploadRequest.setEnableCheckpoint(false);
 
         try {

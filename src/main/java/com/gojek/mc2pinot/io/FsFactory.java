@@ -37,7 +37,7 @@ public class FsFactory {
                 OSSConfig ossConfig = config.getDeepStorageOssConfig();
                 OSS ossClient = buildOSSClient(ossConfig);
                 yield new FsComponents(
-                        new OSSWriter(ossClient, segmentFolderURI),
+                        new OSSWriter(ossClient, segmentFolderURI, ossConfig.getWriterTaskNumber()),
                         new OSSCleaner(ossClient),
                         ossClient::shutdown
                 );
