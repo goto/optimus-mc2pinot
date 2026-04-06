@@ -75,12 +75,13 @@ Where generated segments are staged before being pushed to Pinot. Segments are w
 ```
 The folder is cleaned before segment generation and again after a successful upload. If `PINOT__DEEP_STORAGE_URI` is not set, segments are written to the local filesystem under `/tmp/mc2pinot/` and uploaded to Pinot directly by local file path.
 
-| Variable | Required | Description |
-|---|---|---|
-| `PINOT__DEEP_STORAGE_URI` | No | Base URI for deep storage. Scheme determines the backend. Defaults to local filesystem. |
+| Variable | Required | Description                                                                                       |
+|---|---|---------------------------------------------------------------------------------------------------|
+| `PINOT__DEEP_STORAGE_URI` | No | Base URI for deep storage. Scheme determines the backend. Defaults to local filesystem.           |
 | `PINOT__DEEP_STORAGE_OSS_SERVICE_ACCOUNT` | ✅ if `oss://` | OSS credentials for writing segments (`access_key_id`, `access_key_secret`, `endpoint`, `region`) |
-| `PINOT__DEEP_STORAGE_GCS_SERVICE_ACCOUNT` | ✅ if `gs://` | GCS credentials *(not yet implemented)* |
-| `PINOT__DEEP_STORAGE_S3_SERVICE_ACCOUNT` | ✅ if `s3://` | S3 credentials *(not yet implemented)* |
+| `PINOT__DEEP_STORAGE_OSS_WRITER_TASK_NUMBER` | No | Number of parallel writer tasks for OSS (default: 5)                                              |
+| `PINOT__DEEP_STORAGE_GCS_SERVICE_ACCOUNT` | ✅ if `gs://` | GCS credentials *(not yet implemented)*                                                           |
+| `PINOT__DEEP_STORAGE_S3_SERVICE_ACCOUNT` | ✅ if `s3://` | S3 credentials *(not yet implemented)*                                                            |
 
 Supported `PINOT__DEEP_STORAGE_URI` schemes:
 
