@@ -7,6 +7,21 @@ Optimus mc2pinot is a tool to ingest data from Maxcompute to Pinot as a one-time
 - **Efficient Data Handling**: Built to handle large volumes of data efficiently.
 - **Configurable Deep Storage**: Segments can be written to different storage backends — local filesystem, OSS, S3 (coming soon), or GCS (coming soon) — via `PINOT__DEEP_STORAGE_URI`.
 
+## Usage
+1. Set the required environment variables.
+2. Build the project using Maven:
+   ```
+   mvn clean package
+   ```
+3. Run the tool using the generated JAR file:
+   ```
+   java -jar target/optimus-mc2pinot.jar
+   ```
+4. Or run using the Maven exec plugin:
+   ```
+   mvn clean compile exec:exec
+   ```
+
 ## Flow
 
 ```
@@ -75,18 +90,3 @@ Supported `PINOT__DEEP_STORAGE_URI` schemes:
 | `oss://` | Alibaba Cloud OSS | ✅ Implemented |
 | `s3://` | Amazon S3 | 🚧 Not yet implemented |
 | `gs://` | Google Cloud Storage | 🚧 Not yet implemented |
-
-## Usage
-1. Set the required environment variables.
-2. Build the project using Maven:
-   ```
-   mvn clean package
-   ```
-3. Run the tool using the generated JAR file:
-   ```
-   java -jar target/optimus-mc2pinot.jar
-   ```
-4. Or run using the Maven exec plugin:
-   ```
-   mvn clean compile exec:exec
-   ```
