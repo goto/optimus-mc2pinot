@@ -22,7 +22,7 @@ public class DefaultPinotClient implements PinotClient {
     }
 
     @Override
-    public String triggerUpload(Path segmentFile, String tableName) throws IOException {
+    public String triggerUpload(Path segmentFile, String tableName, String customPayload) throws IOException {
         String tableType = extractTableType(tableName);
         String baseTableName = extractBaseTableName(tableName, tableType);
 
@@ -34,7 +34,7 @@ public class DefaultPinotClient implements PinotClient {
         String boundary = UUID.randomUUID().toString();
         String fileName = segmentFile.getFileName().toString();
         byte[] fileBytes = Files.readAllBytes(segmentFile);
-        byte[] body = buildMultipartBody(boundary, fileName, fileBytes);
+        byte[] body = buildMultipartBody(boundary, fileName, fileBytes, customPayload);
 
         HttpRequest request = HttpRequest.newBuilder()
                 .uri(URI.create(url))
@@ -55,24 +55,30 @@ public class DefaultPinotClient implements PinotClient {
         }
     }
 
-    private byte[] buildMultipartBody(String boundary, String fileName, byte[] fileBytes) {
+    private byte[] buildMultipartBody(String boundary, String fileName, byte[] fileBytes, String customPayload) {
+        String resolvedPayload = (customPayload == null || customPayload.isBlank()) ? "{}" : customPayload;
         String header = "--" + boundary + "\r\n"
                 + "Content-Disposition: form-data; name=\"file\"; filename=\"" + fileName + "\"\r\n"
                 + "Content-Type: application/octet-stream\r\n\r\n";
+        String payloadPart = "\r\n--" + boundary + "\r\n"
+                + "Content-Disposition: form-data; name=\"customPayload\"\r\n\r\n"
+                + resolvedPayload;
         String footer = "\r\n--" + boundary + "--\r\n";
 
         byte[] headerBytes = header.getBytes(StandardCharsets.UTF_8);
+        byte[] payloadBytes = payloadPart.getBytes(StandardCharsets.UTF_8);
         byte[] footerBytes = footer.getBytes(StandardCharsets.UTF_8);
 
-        byte[] body = new byte[headerBytes.length + fileBytes.length + footerBytes.length];
+        byte[] body = new byte[headerBytes.length + fileBytes.length + payloadBytes.length + footerBytes.length];
         System.arraycopy(headerBytes, 0, body, 0, headerBytes.length);
         System.arraycopy(fileBytes, 0, body, headerBytes.length, fileBytes.length);
-        System.arraycopy(footerBytes, 0, body, headerBytes.length + fileBytes.length, footerBytes.length);
+        System.arraycopy(payloadBytes, 0, body, headerBytes.length + fileBytes.length, payloadBytes.length);
+        System.arraycopy(footerBytes, 0, body, headerBytes.length + fileBytes.length + payloadBytes.length, footerBytes.length);
         return body;
     }
 
     @Override
-    public String triggerUploadFromUri(String uri, String tableName) throws IOException {
+    public String triggerUploadFromUri(String uri, String tableName, String customPayload) throws IOException {
         String tableType = extractTableType(tableName);
         String baseTableName = extractBaseTableName(tableName, tableType);
 
@@ -81,12 +87,14 @@ public class DefaultPinotClient implements PinotClient {
                 URLEncoder.encode(baseTableName, StandardCharsets.UTF_8),
                 URLEncoder.encode(tableType, StandardCharsets.UTF_8));
 
+        String body = (customPayload == null || customPayload.isBlank()) ? "{}" : customPayload;
+
         HttpRequest request = HttpRequest.newBuilder()
                 .uri(URI.create(url))
                 .header("Content-Type", "application/json")
                 .header("UPLOAD_TYPE", "URI")
                 .header("DOWNLOAD_URI", uri)
-                .POST(HttpRequest.BodyPublishers.ofString("{}", StandardCharsets.UTF_8))
+                .POST(HttpRequest.BodyPublishers.ofString(body, StandardCharsets.UTF_8))
                 .build();
 
         try {

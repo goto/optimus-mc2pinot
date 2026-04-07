@@ -9,6 +9,7 @@ import org.apache.commons.compress.archivers.tar.TarArchiveOutputStream;
 import org.apache.commons.compress.compressors.gzip.GzipCompressorOutputStream;
 import org.apache.pinot.segment.local.segment.creator.impl.SegmentIndexCreationDriverImpl;
 import org.apache.pinot.segment.spi.creator.SegmentGeneratorConfig;
+import org.apache.pinot.segment.spi.index.metadata.SegmentMetadataImpl;
 import org.apache.pinot.spi.config.table.ColumnPartitionConfig;
 import org.apache.pinot.spi.config.table.SegmentPartitionConfig;
 import org.apache.pinot.spi.config.table.TableConfig;
@@ -49,12 +50,14 @@ public class PinotSegmenter {
         this.partitionFunction = partitionFunction;
     }
 
-    public List<SegmentInfo> generateSegment() throws Exception {
+    public GenerationResult generateSegment() throws Exception {
         String tableName = tableConfig.getTableName();
         PartitionSpec partitionSpec = extractPartitionSpec();
         LOG.info("transient(core): start generating " + partitionSpec.count + " segments...");
 
         List<Path> dataFiles = reader.read();
+        long inputRecordCount = computeInputRecordCount(dataFiles);
+        long inputRecordSize = computeInputRecordSize(dataFiles);
         Path outputDir = Files.createTempDirectory("segment-output-");
         List<SegmentInfo> results = new ArrayList<>();
 
@@ -67,10 +70,14 @@ public class PinotSegmenter {
                         dataFiles, inputFormat, schema.getPhysicalColumnNames(),
                         i, partitionSpec.count, partitionSpec.column, partitionFunction)) {
 
-                    File tarFile = buildSegment(filterReader, segmentName, outputDir);
+                    BuildResult built = buildSegment(filterReader, segmentName, outputDir);
+
+                    long outputRecordCount = built.totalDocs();
+                    long outputRecordSize = built.tarFile().length();
+
                     LOG.info("transient(oss): upload result segment " + segmentName);
-                    String remoteURI = writer.write(segmentName + ".tar.gz", tarFile.toPath());
-                    results.add(new SegmentInfo(segmentName, remoteURI, tarFile.toPath()));
+                    String remoteURI = writer.write(segmentName + ".tar.gz", built.tarFile().toPath());
+                    results.add(new SegmentInfo(segmentName, remoteURI, built.tarFile().toPath(), outputRecordCount, outputRecordSize));
                 }
             }
         } catch (Exception e) {
@@ -82,7 +89,45 @@ public class PinotSegmenter {
             }
         }
 
-        return results;
+        return new GenerationResult(results, inputRecordCount, inputRecordSize);
+    }
+
+    private long computeInputRecordCount(List<Path> dataFiles) {
+        if (dataFiles.isEmpty()) {
+            return 0;
+        }
+        try (PartitionFilteringRecordReader countReader = new PartitionFilteringRecordReader(
+                dataFiles, inputFormat, schema.getPhysicalColumnNames(), 0, 1, null, partitionFunction)) {
+            long count = 0;
+            while (countReader.hasNext()) {
+                countReader.next();
+                count++;
+            }
+            return count;
+        } catch (Exception e) {
+            LOG.warning("transient(core): could not count input records: " + e.getMessage());
+            return 0;
+        }
+    }
+
+    private long computeInputRecordSize(List<Path> dataFiles) {
+        long total = 0;
+        for (Path file : dataFiles) {
+            try {
+                total += Files.size(file);
+            } catch (Exception ignored) {
+            }
+        }
+        return total;
+    }
+
+    private long readSegmentTotalDocs(File segmentDir) {
+        try {
+            return new SegmentMetadataImpl(segmentDir).getTotalDocs();
+        } catch (Exception e) {
+            LOG.warning("transient(core): could not read segment metadata from " + segmentDir + ": " + e.getMessage());
+            return 0;
+        }
     }
 
     private PartitionSpec extractPartitionSpec() {
@@ -104,7 +149,7 @@ public class PinotSegmenter {
         return new PartitionSpec(partitionColumn, numPartitions);
     }
 
-    private File buildSegment(RecordReader recordReader, String segmentName, Path outputDir) throws Exception {
+    private BuildResult buildSegment(RecordReader recordReader, String segmentName, Path outputDir) throws Exception {
         SegmentGeneratorConfig config = new SegmentGeneratorConfig(tableConfig, schema);
         config.setOutDir(outputDir.toAbsolutePath().toString());
         config.setSegmentName(segmentName);
@@ -116,9 +161,11 @@ public class PinotSegmenter {
         File segmentDir = outputDir.resolve(segmentName).toFile();
         File tarFile = outputDir.resolve(segmentName + ".tar.gz").toFile();
         createTarGz(segmentDir, tarFile);
+
+        long totalDocs = readSegmentTotalDocs(segmentDir);
         deleteDirectory(segmentDir);
 
-        return tarFile;
+        return new BuildResult(tarFile, totalDocs);
     }
 
     private void createTarGz(File sourceDir, File outputFile) throws Exception {
@@ -166,5 +213,8 @@ public class PinotSegmenter {
     }
 
     private record PartitionSpec(String column, int count) {
+    }
+
+    private record BuildResult(File tarFile, long totalDocs) {
     }
 }

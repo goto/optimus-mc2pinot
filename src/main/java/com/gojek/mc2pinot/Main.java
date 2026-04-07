@@ -6,7 +6,9 @@ import com.aliyun.odps.account.AliyunAccount;
 import com.aliyun.oss.OSS;
 import com.aliyun.oss.OSSClientBuilder;
 import com.gojek.mc2pinot.config.MaxcomputeConfig;
+import com.gojek.mc2pinot.config.PayloadTemplateRenderer;
 import com.gojek.mc2pinot.config.PinotConfig;
+import com.gojek.mc2pinot.core.GenerationResult;
 import com.gojek.mc2pinot.core.PinotSegmenter;
 import com.gojek.mc2pinot.core.SegmentInfo;
 import com.gojek.mc2pinot.core.partition.PartitionFunction;
@@ -16,6 +18,7 @@ import com.gojek.mc2pinot.io.oss.OSSCleaner;
 import com.gojek.mc2pinot.io.oss.OSSReader;
 import com.gojek.mc2pinot.mc.MCUnloader;
 import com.gojek.mc2pinot.mc.QueryUnloadBuilder;
+import com.gojek.mc2pinot.metrics.SegmentPayloadContext;
 import com.gojek.mc2pinot.pinot.DefaultPinotClient;
 import com.gojek.mc2pinot.pinot.PinotClient;
 import com.gojek.mc2pinot.pinot.PinotSegmentUploader;
@@ -26,6 +29,7 @@ import org.apache.pinot.spi.data.Schema;
 import org.apache.pinot.spi.utils.JsonUtils;
 
 import java.io.FileInputStream;
+import java.io.IOException;
 import java.io.InputStream;
 import java.net.http.HttpClient;
 import java.nio.charset.StandardCharsets;
@@ -88,7 +92,14 @@ public class Main {
                         ossReader, fs.writer(), pinotConfig.getSegmentKey(),
                         pinotConfig.getInputFormat(), schema, tableConfig, partitionFunction);
 
-                List<SegmentInfo> segments = segmenter.generateSegment();
+                GenerationResult result = segmenter.generateSegment();
+                List<SegmentInfo> segments = result.segments();
+
+                long inputRecordCount = result.inputRecordCount();
+                long inputRecordSize = result.inputRecordSize();
+
+                PayloadTemplateRenderer renderer = new PayloadTemplateRenderer(
+                        pinotConfig.getCustomPayloadTemplatePath());
 
                 HttpClient httpClient = HttpClient.newBuilder()
                         .version(HttpClient.Version.HTTP_1_1)
@@ -96,7 +107,21 @@ public class Main {
                 PinotClient pinotClient = new DefaultPinotClient(pinotConfig.getHost(), httpClient);
                 PinotSegmentUploader uploader = new PinotSegmentUploader(pinotClient);
                 try {
-                    uploader.upload(segments, tableName);
+                    uploader.upload(segments, tableName, segment -> {
+                        SegmentPayloadContext ctx = new SegmentPayloadContext(
+                                inputRecordCount,
+                                inputRecordSize,
+                                segment.segmentName(),
+                                segment.outputRecordCount(),
+                                segment.outputRecordSize()
+                        );
+                        try {
+                            return renderer.render(ctx);
+                        } catch (IOException e) {
+                            throw new RuntimeException("Failed to render payload template for segment "
+                                    + segment.segmentName(), e);
+                        }
+                    });
                 } finally {
                     for (SegmentInfo seg : segments) {
                         if (seg.localPath() != null) {

@@ -16,13 +16,15 @@ public class PinotSegmentUploader {
         this.pinotClient = pinotClient;
     }
 
-    public void upload(List<SegmentInfo> segments, String tableName) throws IOException {
+    public void upload(List<SegmentInfo> segments, String tableName,
+                       java.util.function.Function<SegmentInfo, String> payloadSupplier) throws IOException {
         for (SegmentInfo segment : segments) {
             LOG.info("sink(pinot): trigger upload for segment " + segment.segmentName());
+            String payload = payloadSupplier.apply(segment);
             if (segment.localPath() != null) {
-                pinotClient.triggerUpload(segment.localPath(), tableName);
+                pinotClient.triggerUpload(segment.localPath(), tableName, payload);
             } else if (segment.remoteURI() != null) {
-                pinotClient.triggerUploadFromUri(segment.remoteURI(), tableName);
+                pinotClient.triggerUploadFromUri(segment.remoteURI(), tableName, payload);
             } else {
                 throw new IllegalArgumentException(
                         "SegmentInfo has neither a local path nor a remote URI: " + segment.segmentName());

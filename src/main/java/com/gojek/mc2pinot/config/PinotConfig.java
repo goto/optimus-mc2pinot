@@ -6,6 +6,7 @@ import java.util.Map;
 public class PinotConfig {
 
     private final String host;
+    private final String customPayloadTemplatePath;
     private final String segmentKey;
     private final String inputFormat;
     private final String schemaFilePath;
@@ -15,6 +16,7 @@ public class PinotConfig {
 
     public PinotConfig(Map<String, String> env) {
         this.host = ConfigHelper.requireNonEmpty(env, Constant.PINOT_HOST);
+        this.customPayloadTemplatePath = env.get(Constant.PINOT_CUSTOM_PAYLOAD_TEMPLATE_PATH);
         this.segmentKey = ConfigHelper.requireNonEmpty(env, Constant.PINOT_SEGMENT_KEY);
         this.inputFormat = ConfigHelper.requireNonEmpty(env, Constant.PINOT_INPUT_FORMAT);
         this.schemaFilePath = ConfigHelper.requireNonEmpty(env, Constant.PINOT_SCHEMA_FILE_PATH);
@@ -26,6 +28,10 @@ public class PinotConfig {
 
     public String getHost() {
         return host;
+    }
+
+    public String getCustomPayloadTemplatePath() {
+        return customPayloadTemplatePath;
     }
 
     public String getSegmentKey() {

@@ -53,7 +53,7 @@ class DefaultPinotClientTest {
                 .thenReturn(httpResponse);
 
         Path segmentFile = createTempSegmentFile("dummy_table_OFFLINE_0.tar.gz");
-        String result = pinotClient.triggerUpload(segmentFile, "dummy_table_OFFLINE");
+        String result = pinotClient.triggerUpload(segmentFile, "dummy_table_OFFLINE", "{}");
 
         assertEquals("{\"status\":\"ok\"}", result);
 
@@ -77,7 +77,7 @@ class DefaultPinotClientTest {
 
         Path segmentFile = createTempSegmentFile("seg.tar.gz");
         IOException ex = assertThrows(IOException.class, () ->
-                pinotClient.triggerUpload(segmentFile, "table_OFFLINE"));
+                pinotClient.triggerUpload(segmentFile, "table_OFFLINE", "{}"));
         assertTrue(ex.getMessage().contains("500"));
     }
 
@@ -88,7 +88,7 @@ class DefaultPinotClientTest {
 
         Path segmentFile = createTempSegmentFile("seg.tar.gz");
         assertThrows(IOException.class, () ->
-                pinotClient.triggerUpload(segmentFile, "table_OFFLINE"));
+                pinotClient.triggerUpload(segmentFile, "table_OFFLINE", "{}"));
         assertTrue(Thread.currentThread().isInterrupted());
         Thread.interrupted();
     }
@@ -101,7 +101,7 @@ class DefaultPinotClientTest {
                 .thenReturn(httpResponse);
 
         Path segmentFile = createTempSegmentFile("seg.tar.gz");
-        pinotClient.triggerUpload(segmentFile, "my_table");
+        pinotClient.triggerUpload(segmentFile, "my_table", "{}");
 
         ArgumentCaptor<HttpRequest> requestCaptor = ArgumentCaptor.forClass(HttpRequest.class);
         verify(httpClient).send(requestCaptor.capture(), any(HttpResponse.BodyHandler.class));
@@ -129,7 +129,7 @@ class DefaultPinotClientTest {
                 .thenReturn(httpResponse);
 
         String ossUri = "oss://bucket/segments/dummy_table_OFFLINE_0.tar.gz";
-        String result = pinotClient.triggerUploadFromUri(ossUri, "dummy_table_OFFLINE");
+        String result = pinotClient.triggerUploadFromUri(ossUri, "dummy_table_OFFLINE", "{}");
 
         assertEquals("{\"status\":\"ok\"}", result);
 
@@ -154,7 +154,7 @@ class DefaultPinotClientTest {
                 .thenReturn(httpResponse);
 
         IOException ex = assertThrows(IOException.class, () ->
-                pinotClient.triggerUploadFromUri("oss://bucket/seg.tar.gz", "table_OFFLINE"));
+                pinotClient.triggerUploadFromUri("oss://bucket/seg.tar.gz", "table_OFFLINE", "{}"));
         assertTrue(ex.getMessage().contains("500"));
     }
 
@@ -164,7 +164,7 @@ class DefaultPinotClientTest {
                 .thenThrow(new InterruptedException("interrupted"));
 
         assertThrows(IOException.class, () ->
-                pinotClient.triggerUploadFromUri("oss://bucket/seg.tar.gz", "table_OFFLINE"));
+                pinotClient.triggerUploadFromUri("oss://bucket/seg.tar.gz", "table_OFFLINE", "{}"));
         assertTrue(Thread.currentThread().isInterrupted());
         Thread.interrupted();
     }
