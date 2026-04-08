@@ -53,7 +53,7 @@ class DefaultPinotClientTest {
                 .thenReturn(httpResponse);
 
         Path segmentFile = createTempSegmentFile("dummy_table_OFFLINE_0.tar.gz");
-        String result = pinotClient.triggerUpload(segmentFile, "dummy_table_OFFLINE", "{}");
+        String result = pinotClient.triggerUpload(segmentFile, "dummy_table_OFFLINE");
 
         assertEquals("{\"status\":\"ok\"}", result);
 
@@ -77,7 +77,7 @@ class DefaultPinotClientTest {
 
         Path segmentFile = createTempSegmentFile("seg.tar.gz");
         IOException ex = assertThrows(IOException.class, () ->
-                pinotClient.triggerUpload(segmentFile, "table_OFFLINE", "{}"));
+                pinotClient.triggerUpload(segmentFile, "table_OFFLINE"));
         assertTrue(ex.getMessage().contains("500"));
     }
 
@@ -88,7 +88,7 @@ class DefaultPinotClientTest {
 
         Path segmentFile = createTempSegmentFile("seg.tar.gz");
         assertThrows(IOException.class, () ->
-                pinotClient.triggerUpload(segmentFile, "table_OFFLINE", "{}"));
+                pinotClient.triggerUpload(segmentFile, "table_OFFLINE"));
         assertTrue(Thread.currentThread().isInterrupted());
         Thread.interrupted();
     }
@@ -101,7 +101,7 @@ class DefaultPinotClientTest {
                 .thenReturn(httpResponse);
 
         Path segmentFile = createTempSegmentFile("seg.tar.gz");
-        pinotClient.triggerUpload(segmentFile, "my_table", "{}");
+        pinotClient.triggerUpload(segmentFile, "my_table");
 
         ArgumentCaptor<HttpRequest> requestCaptor = ArgumentCaptor.forClass(HttpRequest.class);
         verify(httpClient).send(requestCaptor.capture(), any(HttpResponse.BodyHandler.class));

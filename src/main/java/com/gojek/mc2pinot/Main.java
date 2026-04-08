@@ -22,6 +22,7 @@ import com.gojek.mc2pinot.metrics.SegmentPayloadContext;
 import com.gojek.mc2pinot.pinot.DefaultPinotClient;
 import com.gojek.mc2pinot.pinot.PinotClient;
 import com.gojek.mc2pinot.pinot.PinotSegmentUploader;
+import com.gojek.mc2pinot.pinot.UploadMode;
 import org.apache.pinot.spi.config.table.ColumnPartitionConfig;
 import org.apache.pinot.spi.config.table.SegmentPartitionConfig;
 import org.apache.pinot.spi.config.table.TableConfig;
@@ -101,11 +102,14 @@ public class Main {
                 PayloadTemplateRenderer renderer = new PayloadTemplateRenderer(
                         pinotConfig.getCustomPayloadTemplatePath());
 
+                UploadMode uploadMode = resolveUploadMode(pinotConfig.getDeepStorageURI());
+                LOG.info("resolved upload mode: " + uploadMode);
+
                 HttpClient httpClient = HttpClient.newBuilder()
                         .version(HttpClient.Version.HTTP_1_1)
                         .build();
                 PinotClient pinotClient = new DefaultPinotClient(pinotConfig.getHost(), httpClient);
-                PinotSegmentUploader uploader = new PinotSegmentUploader(pinotClient);
+                PinotSegmentUploader uploader = new PinotSegmentUploader(pinotClient, uploadMode);
                 try {
                     uploader.upload(segments, tableName, segment -> {
                         SegmentPayloadContext ctx = new SegmentPayloadContext(
@@ -172,6 +176,21 @@ public class Main {
         try (InputStream is = new FileInputStream(filePath)) {
             String json = new String(is.readAllBytes(), StandardCharsets.UTF_8);
             return JsonUtils.stringToObject(json, TableConfig.class);
+        }
+    }
+
+    private static UploadMode resolveUploadMode(String deepStorageURI) {
+        if (deepStorageURI == null || deepStorageURI.isBlank()) {
+            return UploadMode.FILE;
+        }
+        try {
+            String scheme = java.net.URI.create(deepStorageURI).getScheme();
+            if (scheme == null || "file".equals(scheme)) {
+                return UploadMode.FILE;
+            }
+            return UploadMode.URI;
+        } catch (IllegalArgumentException e) {
+            return UploadMode.FILE;
         }
     }
 
