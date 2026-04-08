@@ -6,7 +6,7 @@ Optimus mc2pinot is a tool to ingest data from Maxcompute to Pinot as a one-time
 - **One-Time Job**: Designed for one-time data transfer, ideal for batch ingestion.
 - **Efficient Data Handling**: Built to handle large volumes of data efficiently.
 - **Configurable Deep Storage**: Segments can be written to different storage backends — local filesystem, OSS, S3 (coming soon), or GCS (coming soon) — via `PINOT__DEEP_STORAGE_URI`.
-- **Custom Payload Templating**: Supports custom pinot payload with [JTE](https://jte.gg/) templating, allowing users to include custom metadata in segment upload requests.
+- **Custom Payload Templating**: Supports custom pinot payload with [FreeMarker](https://freemarker.apache.org/) templating, allowing users to include custom metadata in segment upload requests.
 
 ## Usage
 1. Set the required environment variables.
@@ -68,7 +68,7 @@ MC (Maxcompute) ──────► OSS Staging ──────► Segment
 | `PINOT__INPUT_FORMAT` | ✅ | Input format of the Maxcompute data (`JSON`, `PARQUET`) |
 | `PINOT__SCHEMA_FILE_PATH` | ✅ | Path to the Pinot table schema file |
 | `PINOT__TABLE_CONFIG_FILE_PATH` | ✅ | Path to the Pinot table configuration file |
-| `PINOT__CUSTOM_PAYLOAD_TEMPLATE_PATH` | No | Path to a [JTE](https://jte.gg/) template file rendered as the upload request body per segment. Defaults to `{}` if not set. |
+| `PINOT__CUSTOM_PAYLOAD_TEMPLATE_PATH` | No | Path to a [FreeMarker](https://freemarker.apache.org/) template file (`.ftl`) rendered as the upload request body per segment. Defaults to `{}` if not set. |
 
 ### Deep Storage
 Where generated segments are staged before being pushed to Pinot. Segments are written to:
@@ -96,26 +96,25 @@ Supported `PINOT__DEEP_STORAGE_URI` schemes:
 
 #### Custom Payload Template
 
-When `PINOT__CUSTOM_PAYLOAD_TEMPLATE_PATH` is set, the file is rendered once per segment upload using [JTE](https://jte.gg/) and sent as the HTTP request body to the Pinot controller. This allows passing custom metadata alongside each segment upload.
+When `PINOT__CUSTOM_PAYLOAD_TEMPLATE_PATH` is set, the file is rendered once per segment upload using [FreeMarker](https://freemarker.apache.org/) and sent as the HTTP request body to the Pinot controller. This allows passing custom metadata alongside each segment upload.
 
-The template receives a single parameter of type `com.gojek.mc2pinot.metrics.SegmentPayloadContext` with the following fields:
+The template has access to the following top-level variables:
 
-| Field | Type | Description |
+| Variable | Type | Description |
 |---|---|---|
-| `inputRecordCount()` | `long` | Total number of records read from the source (before segment creation) |
-| `inputRecordSize()` | `long` | Total byte size of all source data files |
-| `segmentName()` | `String` | Name of the segment being uploaded |
-| `outputRecordCount()` | `long` | Number of records written into this segment |
-| `outputRecordSize()` | `long` | Byte size of the generated segment `.tar.gz` file |
+| `inputRecordCount` | `long` | Total number of records read from the source (before segment creation) |
+| `inputRecordSize` | `long` | Total byte size of all source data files |
+| `segmentName` | `String` | Name of the segment being uploaded |
+| `outputRecordCount` | `long` | Number of records written into this segment |
+| `outputRecordSize` | `long` | Byte size of the generated segment `.tar.gz` file |
 
-Example template (`payload.jte`):
+Example template (`payload.ftl`):
 ```
-@param com.gojek.mc2pinot.metrics.SegmentPayloadContext ctx
 {
-  "input_record_count": ${ctx.inputRecordCount()},
-  "input_record_size": ${ctx.inputRecordSize()},
-  "segment_name": "${ctx.segmentName()}",
-  "output_record_count": ${ctx.outputRecordCount()},
-  "output_record_size": ${ctx.outputRecordSize()}
+  "input_record_count": ${inputRecordCount},
+  "input_record_size": ${inputRecordSize},
+  "segment_name": "${segmentName}",
+  "output_record_count": ${outputRecordCount},
+  "output_record_size": ${outputRecordSize}
 }
 ```

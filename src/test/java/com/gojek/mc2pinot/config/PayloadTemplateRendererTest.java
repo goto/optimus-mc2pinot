@@ -33,10 +33,9 @@ class PayloadTemplateRendererTest {
 
     @Test
     void shouldRenderTemplateWithAllMetricFields() throws IOException {
-        Path templateFile = tempDir.resolve("payload.jte");
+        Path templateFile = tempDir.resolve("payload.ftl");
         String template = """
-                @param com.gojek.mc2pinot.metrics.SegmentPayloadContext ctx
-                {"input_count":${ctx.inputRecordCount()},"input_size":${ctx.inputRecordSize()},"segment":"${ctx.segmentName()}","output_count":${ctx.outputRecordCount()},"output_size":${ctx.outputRecordSize()}}""";
+                {"input_count":${inputRecordCount},"input_size":${inputRecordSize},"segment":"${segmentName}","output_count":${outputRecordCount},"output_size":${outputRecordSize}}""";
         Files.writeString(templateFile, template, StandardCharsets.UTF_8);
 
         PayloadTemplateRenderer renderer = new PayloadTemplateRenderer(templateFile.toString());
@@ -51,10 +50,8 @@ class PayloadTemplateRendererTest {
 
     @Test
     void shouldThrowWhenTemplateFileDoesNotExist() {
-        PayloadTemplateRenderer renderer = new PayloadTemplateRenderer(
-                tempDir.resolve("nonexistent.jte").toString());
-
-        assertThrows(Exception.class, () -> renderer.render(ctx));
+        assertThrows(Exception.class, () -> new PayloadTemplateRenderer(
+                tempDir.resolve("nonexistent.ftl").toString()));
     }
 }
 
