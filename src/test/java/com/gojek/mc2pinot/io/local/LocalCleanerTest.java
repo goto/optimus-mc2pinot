@@ -19,19 +19,17 @@ class LocalCleanerTest {
         Files.writeString(tempDir.resolve("file1.txt"), "data");
         Files.writeString(tempDir.resolve("file2.txt"), "data");
 
-        LocalCleaner cleaner = new LocalCleaner();
-        cleaner.clean(tempDir.toUri().toString());
+        new LocalCleaner().clean(tempDir.toUri().toString());
 
         assertTrue(Files.isDirectory(tempDir));
         assertEquals(0, Files.list(tempDir).count());
     }
 
     @Test
-    void shouldBeNoOpWhenDirectoryDoesNotExist() {
+    void shouldBeNoOpWhenPathDoesNotExist() {
         Path nonExistent = tempDir.resolve("ghost");
 
-        LocalCleaner cleaner = new LocalCleaner();
-        assertDoesNotThrow(() -> cleaner.clean(nonExistent.toUri().toString()));
+        assertDoesNotThrow(() -> new LocalCleaner().clean(nonExistent.toUri().toString()));
     }
 
     @Test
@@ -41,11 +39,36 @@ class LocalCleanerTest {
         Files.writeString(sub.resolve("nested.txt"), "data");
         Files.writeString(tempDir.resolve("top.txt"), "data");
 
-        LocalCleaner cleaner = new LocalCleaner();
-        cleaner.clean(tempDir.toUri().toString());
+        new LocalCleaner().clean(tempDir.toUri().toString());
 
         assertTrue(Files.isDirectory(tempDir));
         assertEquals(0, Files.list(tempDir).count());
     }
-}
 
+    @Test
+    void shouldDeleteSingleFileWhenUriPointsToFile() throws IOException {
+        Path file = Files.writeString(tempDir.resolve("seg_0.tar.gz"), "data");
+
+        new LocalCleaner().clean(file.toUri().toString());
+
+        assertFalse(Files.exists(file));
+    }
+
+    @Test
+    void shouldBeNoOpWhenFileDoesNotExist() {
+        Path nonExistent = tempDir.resolve("ghost.tar.gz");
+
+        assertDoesNotThrow(() -> new LocalCleaner().clean(nonExistent.toUri().toString()));
+    }
+
+    @Test
+    void shouldNotDeleteSiblingFilesOnSingleFileClean() throws IOException {
+        Path target = Files.writeString(tempDir.resolve("seg_0.tar.gz"), "data");
+        Path sibling = Files.writeString(tempDir.resolve("seg_1.tar.gz"), "data");
+
+        new LocalCleaner().clean(target.toUri().toString());
+
+        assertFalse(Files.exists(target));
+        assertTrue(Files.exists(sibling));
+    }
+}

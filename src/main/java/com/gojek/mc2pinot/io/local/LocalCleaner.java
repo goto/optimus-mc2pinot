@@ -14,19 +14,21 @@ public class LocalCleaner implements Cleaner {
     private static final Logger LOG = Logger.getLogger(LocalCleaner.class.getName());
 
     @Override
-    public void clean(String destinationURI) throws IOException {
-        URI uri = URI.create(destinationURI);
-        String pathStr = uri.getScheme() != null ? uri.getPath() : destinationURI;
-        Path dir = Paths.get(pathStr);
+    public void clean(String uri) throws IOException {
+        URI parsed = URI.create(uri);
+        String pathStr = parsed.getScheme() != null ? parsed.getPath() : uri;
+        Path path = Paths.get(pathStr);
 
-        if (!Files.exists(dir)) {
-            LOG.info("transient(local): destination does not exist, nothing to clean: " + dir);
-            return;
+        if (Files.isDirectory(path)) {
+            LOG.info("transient(local): clean directory " + path);
+            deleteRecursively(path);
+            Files.createDirectories(path);
+        } else if (Files.isRegularFile(path)) {
+            LOG.info("transient(local): delete segment " + path);
+            Files.deleteIfExists(path);
+        } else {
+            LOG.info("transient(local): path does not exist, nothing to clean: " + path);
         }
-
-        LOG.info("transient(local): clean destination " + dir);
-        deleteRecursively(dir);
-        Files.createDirectories(dir);
     }
 
     private void deleteRecursively(Path path) throws IOException {
@@ -40,4 +42,3 @@ public class LocalCleaner implements Cleaner {
         Files.deleteIfExists(path);
     }
 }
-

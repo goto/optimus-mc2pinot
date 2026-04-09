@@ -20,15 +20,21 @@ public class OSSCleaner implements Cleaner {
     }
 
     @Override
-    public void clean(String destinationURI) throws IOException {
-        LOG.info("transient(oss): clean destination " + destinationURI);
-        URI uri = URI.create(destinationURI);
-        String bucket = uri.getHost();
-        String prefix = uri.getPath().substring(1);
-        if (!prefix.endsWith("/")) {
-            prefix = prefix + "/";
-        }
+    public void clean(String uri) throws IOException {
+        URI parsed = URI.create(uri);
+        String bucket = parsed.getHost();
+        String path = parsed.getPath().substring(1);
 
+        if (uri.endsWith("/")) {
+            cleanPrefix(bucket, path);
+        } else {
+            LOG.info("transient(oss): delete segment " + uri);
+            ossClient.deleteObject(bucket, path);
+        }
+    }
+
+    private void cleanPrefix(String bucket, String prefix) {
+        LOG.info("transient(oss): clean prefix oss://" + bucket + "/" + prefix);
         String marker = null;
         boolean hasMore = true;
 
@@ -54,4 +60,3 @@ public class OSSCleaner implements Cleaner {
         }
     }
 }
-

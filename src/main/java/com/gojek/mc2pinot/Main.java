@@ -71,7 +71,7 @@ public class Main {
                     mcConfig.getOssRoleArn(),
                     pinotConfig.getInputFormat());
 
-            new OSSCleaner(mcOssClient).clean(mcConfig.getOssDestinationURI());
+            new OSSCleaner(mcOssClient).clean(mcConfig.getOssDestinationURI() + "/");
             mcUnloader.unload(query, mcConfig.getOssDestinationURI());
 
             Schema schema = loadSchema(pinotConfig.getSchemaFilePath());
@@ -87,7 +87,7 @@ public class Main {
             try (OSSReader ossReader = new OSSReader(mcOssClient, mcConfig.getOssDestinationURI());
                  FsFactory.FsComponents fs = FsFactory.create(pinotConfig, segmentFolderURI)) {
 
-                fs.cleaner().clean(segmentFolderURI);
+                fs.cleaner().clean(segmentFolderURI + "/");
 
                 PinotSegmenter segmenter = new PinotSegmenter(
                         ossReader, fs.writer(), pinotConfig.getSegmentKey(),
@@ -109,7 +109,7 @@ public class Main {
                         .version(HttpClient.Version.HTTP_1_1)
                         .build();
                 PinotClient pinotClient = new DefaultPinotClient(pinotConfig.getHost(), httpClient);
-                PinotSegmentUploader uploader = new PinotSegmentUploader(pinotClient, uploadMode);
+                PinotSegmentUploader uploader = new PinotSegmentUploader(pinotClient, uploadMode, fs.cleaner());
                 try {
                     uploader.upload(segments, tableName, segment -> {
                         SegmentPayloadContext ctx = new SegmentPayloadContext(
@@ -127,15 +127,10 @@ public class Main {
                                     + segment.segmentName(), e);
                         }
                     });
+                    new OSSCleaner(mcOssClient).clean(mcConfig.getOssDestinationURI() + "/");
                 } finally {
-                    for (SegmentInfo seg : segments) {
-                        if (seg.localPath() != null) {
-                            seg.localPath().toFile().delete();
-                        }
-                    }
+                    fs.cleaner().clean(segmentFolderURI + "/");
                 }
-
-                fs.cleaner().clean(segmentFolderURI);
             }
         } finally {
             mcOssClient.shutdown();

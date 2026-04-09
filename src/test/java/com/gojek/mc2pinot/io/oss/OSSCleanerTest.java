@@ -34,18 +34,18 @@ class OSSCleanerTest {
         when(objectListing.getObjectSummaries()).thenReturn(List.of(summary));
         when(objectListing.isTruncated()).thenReturn(false);
 
-        new OSSCleaner(ossClient).clean("oss://my-bucket/data/prefix");
+        new OSSCleaner(ossClient).clean("oss://my-bucket/data/prefix/");
 
         verify(ossClient).deleteObject("my-bucket", "data/prefix/part-0.json");
     }
 
     @Test
-    void shouldBeNoOpWhenDestinationIsEmpty() throws IOException {
+    void shouldBeNoOpWhenDestinationIsEmpty() {
         when(ossClient.listObjects(any(ListObjectsRequest.class))).thenReturn(objectListing);
         when(objectListing.getObjectSummaries()).thenReturn(List.of());
         when(objectListing.isTruncated()).thenReturn(false);
 
-        assertDoesNotThrow(() -> new OSSCleaner(ossClient).clean("oss://my-bucket/data/empty"));
+        assertDoesNotThrow(() -> new OSSCleaner(ossClient).clean("oss://my-bucket/data/empty/"));
 
         verify(ossClient, never()).deleteObject(any(), any());
     }
@@ -69,10 +69,24 @@ class OSSCleanerTest {
         when(listing2.getObjectSummaries()).thenReturn(List.of(page2));
         when(listing2.isTruncated()).thenReturn(false);
 
-        new OSSCleaner(ossClient).clean("oss://my-bucket/data/prefix");
+        new OSSCleaner(ossClient).clean("oss://my-bucket/data/prefix/");
 
         verify(ossClient).deleteObject("my-bucket", "data/prefix/file-1.json");
         verify(ossClient).deleteObject("my-bucket", "data/prefix/file-2.json");
     }
-}
 
+    @Test
+    void shouldDeleteSingleObjectWhenUriHasNoTrailingSlash() throws IOException {
+        new OSSCleaner(ossClient).clean("oss://my-bucket/data/segments/seg_0.tar.gz");
+
+        verify(ossClient).deleteObject("my-bucket", "data/segments/seg_0.tar.gz");
+        verifyNoMoreInteractions(ossClient);
+    }
+
+    @Test
+    void shouldParseNestedKeyCorrectlyOnSingleFileClean() throws IOException {
+        new OSSCleaner(ossClient).clean("oss://my-bucket/a/b/c/seg.tar.gz");
+
+        verify(ossClient).deleteObject("my-bucket", "a/b/c/seg.tar.gz");
+    }
+}
