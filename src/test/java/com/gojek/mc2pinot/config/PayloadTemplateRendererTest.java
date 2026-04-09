@@ -17,7 +17,7 @@ class PayloadTemplateRendererTest {
     Path tempDir;
 
     private final SegmentPayloadContext ctx = new SegmentPayloadContext(
-            100L, 204800L, "my_table_OFFLINE_12345_0", 50L, 102400L);
+            100L, 204800L, "my_table", "my_table_OFFLINE_12345_0", 50L, 102400L);
 
     @Test
     void shouldReturnFallbackWhenTemplatePathIsNull() throws IOException {
@@ -35,7 +35,7 @@ class PayloadTemplateRendererTest {
     void shouldRenderTemplateWithAllMetricFields() throws IOException {
         Path templateFile = tempDir.resolve("payload.ftl");
         String template = """
-                {"input_count":${inputRecordCount},"input_size":${inputRecordSize},"segment":"${segmentName}","output_count":${outputRecordCount},"output_size":${outputRecordSize}}""";
+                {"input_count":${inputRecordCount},"input_size":${inputRecordSize},"table":"${tableName}","segment":"${segmentName}","output_count":${outputRecordCount},"output_size":${outputRecordSize}}""";
         Files.writeString(templateFile, template, StandardCharsets.UTF_8);
 
         PayloadTemplateRenderer renderer = new PayloadTemplateRenderer(templateFile.toString());
@@ -43,6 +43,7 @@ class PayloadTemplateRendererTest {
 
         assertTrue(result.contains("\"input_count\":100"));
         assertTrue(result.contains("\"input_size\":204800"));
+        assertTrue(result.contains("\"table\":\"my_table\""));
         assertTrue(result.contains("\"segment\":\"my_table_OFFLINE_12345_0\""));
         assertTrue(result.contains("\"output_count\":50"));
         assertTrue(result.contains("\"output_size\":102400"));

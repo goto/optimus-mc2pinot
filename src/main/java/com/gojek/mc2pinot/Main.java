@@ -115,6 +115,7 @@ public class Main {
                         SegmentPayloadContext ctx = new SegmentPayloadContext(
                                 inputRecordCount,
                                 inputRecordSize,
+                                tableName,
                                 segment.segmentName(),
                                 segment.outputRecordCount(),
                                 segment.outputRecordSize()

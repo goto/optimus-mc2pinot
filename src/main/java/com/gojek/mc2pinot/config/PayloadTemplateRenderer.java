@@ -45,6 +45,7 @@ public class PayloadTemplateRenderer {
         Map<String, Object> model = new HashMap<>();
         model.put("inputRecordCount", context.inputRecordCount());
         model.put("inputRecordSize", context.inputRecordSize());
+        model.put("tableName", context.tableName());
         model.put("segmentName", context.segmentName());
         model.put("outputRecordCount", context.outputRecordCount());
         model.put("outputRecordSize", context.outputRecordSize());
