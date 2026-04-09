@@ -127,6 +127,7 @@ public class Main {
                                     + segment.segmentName(), e);
                         }
                     });
+                    new OSSCleaner(mcOssClient).clean(mcConfig.getOssDestinationURI() + "/");
                 } finally {
                     fs.cleaner().clean(segmentFolderURI + "/");
                 }
