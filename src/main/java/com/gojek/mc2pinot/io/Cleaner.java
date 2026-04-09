@@ -6,4 +6,3 @@ public interface Cleaner {
 
     void clean(String destinationURI) throws IOException;
 }
-

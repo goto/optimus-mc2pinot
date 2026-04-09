@@ -1,6 +1,7 @@
 package com.gojek.mc2pinot.pinot;
 
 import com.gojek.mc2pinot.core.SegmentInfo;
+import com.gojek.mc2pinot.io.Cleaner;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.junit.jupiter.api.io.TempDir;
@@ -13,7 +14,7 @@ import java.nio.file.Path;
 import java.util.List;
 import java.util.function.Function;
 
-import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.Mockito.*;
 
 @ExtendWith(MockitoExtension.class)
@@ -22,6 +23,9 @@ class PinotSegmentUploaderTest {
     @Mock
     private PinotClient pinotClient;
 
+    @Mock
+    private Cleaner cleaner;
+
     @TempDir
     Path tempDir;
 
@@ -29,7 +33,7 @@ class PinotSegmentUploaderTest {
 
     @Test
     void shouldUseRemoteUriInUriMode() throws IOException {
-        PinotSegmentUploader uploader = new PinotSegmentUploader(pinotClient, UploadMode.URI);
+        PinotSegmentUploader uploader = new PinotSegmentUploader(pinotClient, UploadMode.URI, cleaner);
         List<SegmentInfo> segments = List.of(
                 new SegmentInfo("seg_0", "oss://bucket/segments/seg_0.tar.gz", null, 10, 1024),
                 new SegmentInfo("seg_1", "gs://bucket/segments/seg_1.tar.gz", null, 20, 2048),
@@ -43,12 +47,16 @@ class PinotSegmentUploaderTest {
         verify(pinotClient).triggerUploadFromUri("oss://bucket/segments/seg_0.tar.gz", "my_table_OFFLINE", "{}");
         verify(pinotClient).triggerUploadFromUri("gs://bucket/segments/seg_1.tar.gz", "my_table_OFFLINE", "{}");
         verify(pinotClient).triggerUploadFromUri("s3://bucket/segments/seg_2.tar.gz", "my_table_OFFLINE", "{}");
+        verify(cleaner).clean("oss://bucket/segments/seg_0.tar.gz");
+        verify(cleaner).clean("gs://bucket/segments/seg_1.tar.gz");
+        verify(cleaner).clean("s3://bucket/segments/seg_2.tar.gz");
         verifyNoMoreInteractions(pinotClient);
+        verifyNoMoreInteractions(cleaner);
     }
 
     @Test
     void shouldUseLocalPathInFileMode() throws IOException {
-        PinotSegmentUploader uploader = new PinotSegmentUploader(pinotClient, UploadMode.FILE);
+        PinotSegmentUploader uploader = new PinotSegmentUploader(pinotClient, UploadMode.FILE, cleaner);
         Path seg0 = Files.createFile(tempDir.resolve("seg_0.tar.gz"));
         Path seg1 = Files.createFile(tempDir.resolve("seg_1.tar.gz"));
 
@@ -63,12 +71,15 @@ class PinotSegmentUploaderTest {
 
         verify(pinotClient).triggerUpload(seg0, "my_table_OFFLINE");
         verify(pinotClient).triggerUpload(seg1, "my_table_OFFLINE");
+        assertFalse(Files.exists(seg0));
+        assertFalse(Files.exists(seg1));
+        verifyNoInteractions(cleaner);
         verifyNoMoreInteractions(pinotClient);
     }
 
     @Test
     void shouldUseRemoteUriInUriModeEvenWhenLocalPathIsSet() throws IOException {
-        PinotSegmentUploader uploader = new PinotSegmentUploader(pinotClient, UploadMode.URI);
+        PinotSegmentUploader uploader = new PinotSegmentUploader(pinotClient, UploadMode.URI, cleaner);
         Path localFile = Files.createFile(tempDir.resolve("seg_0.tar.gz"));
 
         List<SegmentInfo> segments = List.of(
@@ -80,12 +91,15 @@ class PinotSegmentUploaderTest {
         uploader.upload(segments, "my_table_OFFLINE", fixedPayload);
 
         verify(pinotClient).triggerUploadFromUri("oss://bucket/segments/seg_0.tar.gz", "my_table_OFFLINE", "{}");
+        assertFalse(Files.exists(localFile));
+        verify(cleaner).clean("oss://bucket/segments/seg_0.tar.gz");
         verifyNoMoreInteractions(pinotClient);
+        verifyNoMoreInteractions(cleaner);
     }
 
     @Test
     void shouldUseLocalPathInFileModeEvenWhenRemoteUriIsSet() throws IOException {
-        PinotSegmentUploader uploader = new PinotSegmentUploader(pinotClient, UploadMode.FILE);
+        PinotSegmentUploader uploader = new PinotSegmentUploader(pinotClient, UploadMode.FILE, cleaner);
         Path localFile = Files.createFile(tempDir.resolve("seg_0.tar.gz"));
 
         List<SegmentInfo> segments = List.of(
@@ -97,12 +111,15 @@ class PinotSegmentUploaderTest {
         uploader.upload(segments, "my_table_OFFLINE", fixedPayload);
 
         verify(pinotClient).triggerUpload(localFile, "my_table_OFFLINE");
+        assertFalse(Files.exists(localFile));
+        verify(cleaner).clean("oss://bucket/segments/seg_0.tar.gz");
         verifyNoMoreInteractions(pinotClient);
+        verifyNoMoreInteractions(cleaner);
     }
 
     @Test
     void shouldNotInvokePayloadSupplierInFileMode() throws IOException {
-        PinotSegmentUploader uploader = new PinotSegmentUploader(pinotClient, UploadMode.FILE);
+        PinotSegmentUploader uploader = new PinotSegmentUploader(pinotClient, UploadMode.FILE, cleaner);
         Path localFile = Files.createFile(tempDir.resolve("seg_0.tar.gz"));
 
         List<SegmentInfo> segments = List.of(
@@ -120,14 +137,15 @@ class PinotSegmentUploaderTest {
 
     @Test
     void shouldHandleEmptySegmentList() throws IOException {
-        PinotSegmentUploader uploader = new PinotSegmentUploader(pinotClient, UploadMode.FILE);
+        PinotSegmentUploader uploader = new PinotSegmentUploader(pinotClient, UploadMode.FILE, cleaner);
         uploader.upload(List.of(), "my_table_OFFLINE", fixedPayload);
         verifyNoInteractions(pinotClient);
+        verifyNoInteractions(cleaner);
     }
 
     @Test
     void shouldThrowWhenUriModeButRemoteUriIsNull() {
-        PinotSegmentUploader uploader = new PinotSegmentUploader(pinotClient, UploadMode.URI);
+        PinotSegmentUploader uploader = new PinotSegmentUploader(pinotClient, UploadMode.URI, cleaner);
         List<SegmentInfo> segments = List.of(
                 new SegmentInfo("seg_0", null, null, 0, 0)
         );
@@ -138,7 +156,7 @@ class PinotSegmentUploaderTest {
 
     @Test
     void shouldThrowWhenFileModeButLocalPathIsNull() {
-        PinotSegmentUploader uploader = new PinotSegmentUploader(pinotClient, UploadMode.FILE);
+        PinotSegmentUploader uploader = new PinotSegmentUploader(pinotClient, UploadMode.FILE, cleaner);
         List<SegmentInfo> segments = List.of(
                 new SegmentInfo("seg_0", "oss://bucket/seg_0.tar.gz", null, 0, 0)
         );
@@ -149,7 +167,7 @@ class PinotSegmentUploaderTest {
 
     @Test
     void shouldPropagateExceptionOnUploadFailure() throws IOException {
-        PinotSegmentUploader uploader = new PinotSegmentUploader(pinotClient, UploadMode.URI);
+        PinotSegmentUploader uploader = new PinotSegmentUploader(pinotClient, UploadMode.URI, cleaner);
         List<SegmentInfo> segments = List.of(
                 new SegmentInfo("seg_0", "oss://bucket/segments/seg_0.tar.gz", null, 5, 512)
         );
@@ -159,11 +177,12 @@ class PinotSegmentUploaderTest {
 
         assertThrows(IOException.class,
                 () -> uploader.upload(segments, "my_table_OFFLINE", fixedPayload));
+        verifyNoInteractions(cleaner);
     }
 
     @Test
     void shouldPassPerSegmentRenderedPayloadInUriMode() throws IOException {
-        PinotSegmentUploader uploader = new PinotSegmentUploader(pinotClient, UploadMode.URI);
+        PinotSegmentUploader uploader = new PinotSegmentUploader(pinotClient, UploadMode.URI, cleaner);
         List<SegmentInfo> segments = List.of(
                 new SegmentInfo("seg_0", "oss://bucket/segments/seg_0.tar.gz", null, 10, 1024),
                 new SegmentInfo("seg_1", "oss://bucket/segments/seg_1.tar.gz", null, 20, 2048)
@@ -179,5 +198,23 @@ class PinotSegmentUploaderTest {
         verify(pinotClient).triggerUploadFromUri(
                 "oss://bucket/segments/seg_1.tar.gz", "my_table_OFFLINE", "{\"segment\":\"seg_1\"}");
     }
-}
 
+    @Test
+    void shouldCleanAlreadyUploadedSegmentsBeforeMidBatchFailure() throws IOException {
+        PinotSegmentUploader uploader = new PinotSegmentUploader(pinotClient, UploadMode.URI, cleaner);
+        List<SegmentInfo> segments = List.of(
+                new SegmentInfo("seg_0", "oss://bucket/segments/seg_0.tar.gz", null, 10, 1024),
+                new SegmentInfo("seg_1", "oss://bucket/segments/seg_1.tar.gz", null, 20, 2048)
+        );
+
+        when(pinotClient.triggerUploadFromUri(anyString(), anyString(), anyString()))
+                .thenReturn("ok")
+                .thenThrow(new IOException("upload failed"));
+
+        assertThrows(IOException.class,
+                () -> uploader.upload(segments, "my_table_OFFLINE", fixedPayload));
+
+        verify(cleaner).clean("oss://bucket/segments/seg_0.tar.gz");
+        verify(cleaner, never()).clean("oss://bucket/segments/seg_1.tar.gz");
+    }
+}

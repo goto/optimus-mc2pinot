@@ -1,8 +1,10 @@
 package com.gojek.mc2pinot.pinot;
 
 import com.gojek.mc2pinot.core.SegmentInfo;
+import com.gojek.mc2pinot.io.Cleaner;
 
 import java.io.IOException;
+import java.nio.file.Files;
 import java.util.List;
 import java.util.function.Function;
 import java.util.logging.Logger;
@@ -13,10 +15,12 @@ public class PinotSegmentUploader {
 
     private final PinotClient pinotClient;
     private final UploadMode uploadMode;
+    private final Cleaner cleaner;
 
-    public PinotSegmentUploader(PinotClient pinotClient, UploadMode uploadMode) {
+    public PinotSegmentUploader(PinotClient pinotClient, UploadMode uploadMode, Cleaner cleaner) {
         this.pinotClient = pinotClient;
         this.uploadMode = uploadMode;
+        this.cleaner = cleaner;
     }
 
     public void upload(List<SegmentInfo> segments, String tableName,
@@ -39,6 +43,12 @@ public class PinotSegmentUploader {
                     }
                     pinotClient.triggerUpload(segment.localPath(), tableName);
                 }
+            }
+            if (segment.localPath() != null) {
+                Files.deleteIfExists(segment.localPath());
+            }
+            if (segment.remoteURI() != null) {
+                cleaner.clean(segment.remoteURI());
             }
         }
     }
