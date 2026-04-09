@@ -72,7 +72,7 @@ public class DefaultPinotClient implements PinotClient {
     }
 
     @Override
-    public String triggerUploadFromUri(String uri, String tableName) throws IOException {
+    public String triggerUploadFromUri(String uri, String tableName, String customPayload) throws IOException {
         String tableType = extractTableType(tableName);
         String baseTableName = extractBaseTableName(tableName, tableType);
 
@@ -81,12 +81,14 @@ public class DefaultPinotClient implements PinotClient {
                 URLEncoder.encode(baseTableName, StandardCharsets.UTF_8),
                 URLEncoder.encode(tableType, StandardCharsets.UTF_8));
 
+        String body = (customPayload == null || customPayload.isBlank()) ? "{}" : customPayload;
+
         HttpRequest request = HttpRequest.newBuilder()
                 .uri(URI.create(url))
                 .header("Content-Type", "application/json")
                 .header("UPLOAD_TYPE", "URI")
                 .header("DOWNLOAD_URI", uri)
-                .POST(HttpRequest.BodyPublishers.ofString("{}", StandardCharsets.UTF_8))
+                .POST(HttpRequest.BodyPublishers.ofString(body, StandardCharsets.UTF_8))
                 .build();
 
         try {

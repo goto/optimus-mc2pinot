@@ -7,7 +7,7 @@ public interface PinotClient {
 
     String triggerUpload(Path segmentFile, String tableName) throws IOException;
 
-    String triggerUploadFromUri(String uri, String tableName) throws IOException;
+    String triggerUploadFromUri(String uri, String tableName, String customPayload) throws IOException;
 
     String getSchema(String tableName) throws IOException;
 

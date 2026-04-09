@@ -12,7 +12,6 @@ import org.junit.jupiter.api.extension.ExtendWith;
 import org.junit.jupiter.api.io.TempDir;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
-
 import java.io.IOException;
 import java.io.InputStream;
 import java.nio.charset.StandardCharsets;
@@ -59,14 +58,20 @@ class PinotSegmenterTest {
         PinotSegmenter segmenter = new PinotSegmenter(
                 reader, writer, "12345", "json", schema, tableConfig, partitionFunction);
 
-        List<SegmentInfo> result = segmenter.generateSegment();
+        GenerationResult result = segmenter.generateSegment();
+        List<SegmentInfo> segments = result.segments();
 
-        assertEquals(1, result.size());
-        assertEquals("test_table_OFFLINE_12345_0", result.get(0).segmentName());
-        assertTrue(result.get(0).remoteURI().startsWith("oss://bucket/segments/"));
-        assertTrue(result.get(0).remoteURI().endsWith(".tar.gz"));
-        assertNotNull(result.get(0).localPath());
-        assertTrue(Files.exists(result.get(0).localPath()));
+        assertEquals(1, segments.size());
+        SegmentInfo seg = segments.get(0);
+        assertEquals("test_table_OFFLINE_12345_0", seg.segmentName());
+        assertTrue(seg.remoteURI().startsWith("oss://bucket/segments/"));
+        assertTrue(seg.remoteURI().endsWith(".tar.gz"));
+        assertNotNull(seg.localPath());
+        assertTrue(Files.exists(seg.localPath()));
+        assertEquals(2, seg.outputRecordCount());
+        assertTrue(seg.outputRecordSize() > 0);
+        assertEquals(2, result.inputRecordCount());
+        assertTrue(result.inputRecordSize() > 0);
 
         verify(reader).read();
         verify(writer).write(eq("test_table_OFFLINE_12345_0.tar.gz"), any(Path.class));
@@ -83,9 +88,9 @@ class PinotSegmenterTest {
         PinotSegmenter segmenter = new PinotSegmenter(
                 reader, writer, "99", "json", schema, tableConfig, partitionFunction);
 
-        List<SegmentInfo> result = segmenter.generateSegment();
+        GenerationResult result = segmenter.generateSegment();
 
-        assertEquals(1, result.size());
+        assertEquals(1, result.segments().size());
         verify(writer, times(1)).write(anyString(), any(Path.class));
     }
 
