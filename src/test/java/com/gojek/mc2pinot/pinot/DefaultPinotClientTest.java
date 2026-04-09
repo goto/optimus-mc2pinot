@@ -14,6 +14,7 @@ import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.any;
@@ -167,6 +168,62 @@ class DefaultPinotClientTest {
                 pinotClient.triggerUploadFromUri("oss://bucket/seg.tar.gz", "table_OFFLINE", "{}"));
         assertTrue(Thread.currentThread().isInterrupted());
         Thread.interrupted();
+    }
+
+    @Test
+    void shouldSendCustomHeadersOnTriggerUpload() throws Exception {
+        when(httpResponse.statusCode()).thenReturn(200);
+        when(httpResponse.body()).thenReturn("ok");
+        when(httpClient.send(any(HttpRequest.class), any(HttpResponse.BodyHandler.class)))
+                .thenReturn(httpResponse);
+
+        DefaultPinotClient clientWithHeaders = new DefaultPinotClient(
+                "http://localhost:9000", httpClient, Map.of("X-Auth", "secret"));
+
+        Path segmentFile = createTempSegmentFile("seg.tar.gz");
+        clientWithHeaders.triggerUpload(segmentFile, "table_OFFLINE");
+
+        ArgumentCaptor<HttpRequest> captor = ArgumentCaptor.forClass(HttpRequest.class);
+        verify(httpClient).send(captor.capture(), any(HttpResponse.BodyHandler.class));
+
+        assertEquals("secret", captor.getValue().headers().firstValue("X-Auth").orElse(""));
+    }
+
+    @Test
+    void shouldSendCustomHeadersOnTriggerUploadFromUri() throws Exception {
+        when(httpResponse.statusCode()).thenReturn(200);
+        when(httpResponse.body()).thenReturn("ok");
+        when(httpClient.send(any(HttpRequest.class), any(HttpResponse.BodyHandler.class)))
+                .thenReturn(httpResponse);
+
+        DefaultPinotClient clientWithHeaders = new DefaultPinotClient(
+                "http://localhost:9000", httpClient, Map.of("X-Tenant", "gojek"));
+
+        clientWithHeaders.triggerUploadFromUri("oss://bucket/seg.tar.gz", "table_OFFLINE", "{}");
+
+        ArgumentCaptor<HttpRequest> captor = ArgumentCaptor.forClass(HttpRequest.class);
+        verify(httpClient).send(captor.capture(), any(HttpResponse.BodyHandler.class));
+
+        assertEquals("gojek", captor.getValue().headers().firstValue("X-Tenant").orElse(""));
+    }
+
+    @Test
+    void shouldNotOverrideBuiltInHeadersWithCustomHeaders() throws Exception {
+        when(httpResponse.statusCode()).thenReturn(200);
+        when(httpResponse.body()).thenReturn("ok");
+        when(httpClient.send(any(HttpRequest.class), any(HttpResponse.BodyHandler.class)))
+                .thenReturn(httpResponse);
+
+        DefaultPinotClient clientWithHeaders = new DefaultPinotClient(
+                "http://localhost:9000", httpClient, Map.of("Content-Type", "text/plain"));
+
+        clientWithHeaders.triggerUploadFromUri("oss://bucket/seg.tar.gz", "table_OFFLINE", "{}");
+
+        ArgumentCaptor<HttpRequest> captor = ArgumentCaptor.forClass(HttpRequest.class);
+        verify(httpClient).send(captor.capture(), any(HttpResponse.BodyHandler.class));
+
+        String contentType = captor.getValue().headers().firstValue("Content-Type").orElse("");
+        assertEquals("application/json", contentType);
     }
 }
 

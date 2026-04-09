@@ -69,6 +69,7 @@ MC (Maxcompute) ──────► OSS Staging ──────► Segment
 | `PINOT__SCHEMA_FILE_PATH` | ✅ | Path to the Pinot table schema file |
 | `PINOT__TABLE_CONFIG_FILE_PATH` | ✅ | Path to the Pinot table configuration file |
 | `PINOT__CUSTOM_PAYLOAD_TEMPLATE_PATH` | No | Path to a [FreeMarker](https://freemarker.apache.org/) template file (`.ftl`) rendered as the upload request body per segment. Defaults to `{}` if not set. |
+| `PINOT__CUSTOM_HEADERS_PATH` | No | Path to a JSON file containing custom HTTP headers to include in Pinot requests (e.g. for authentication). Defaults to `{}` if not set. |
 
 ### Deep Storage
 Where generated segments are staged before being pushed to Pinot. Segments are written to:

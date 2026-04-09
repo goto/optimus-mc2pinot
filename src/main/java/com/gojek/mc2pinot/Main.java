@@ -5,6 +5,7 @@ import com.aliyun.odps.account.Account;
 import com.aliyun.odps.account.AliyunAccount;
 import com.aliyun.oss.OSS;
 import com.aliyun.oss.OSSClientBuilder;
+import com.gojek.mc2pinot.config.CustomHeadersLoader;
 import com.gojek.mc2pinot.config.MaxcomputeConfig;
 import com.gojek.mc2pinot.config.PayloadTemplateRenderer;
 import com.gojek.mc2pinot.config.PinotConfig;
@@ -108,7 +109,9 @@ public class Main {
                 HttpClient httpClient = HttpClient.newBuilder()
                         .version(HttpClient.Version.HTTP_1_1)
                         .build();
-                PinotClient pinotClient = new DefaultPinotClient(pinotConfig.getHost(), httpClient);
+                Map<String, String> customHeaders =
+                        new CustomHeadersLoader(pinotConfig.getCustomHeadersPath()).load();
+                PinotClient pinotClient = new DefaultPinotClient(pinotConfig.getHost(), httpClient, customHeaders);
                 PinotSegmentUploader uploader = new PinotSegmentUploader(pinotClient, uploadMode, fs.cleaner());
                 try {
                     uploader.upload(segments, tableName, segment -> {

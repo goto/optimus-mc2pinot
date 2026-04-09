@@ -8,6 +8,7 @@ public class Constant {
     public static final String MC_OSS_ROLE_ARN = "MC__OSS_ROLE_ARN";
 
     public static final String PINOT_HOST = "PINOT__HOST";
+    public static final String PINOT_CUSTOM_HEADERS_PATH = "PINOT__CUSTOM_HEADERS_PATH";
     public static final String PINOT_CUSTOM_PAYLOAD_TEMPLATE_PATH = "PINOT__CUSTOM_PAYLOAD_TEMPLATE_PATH";
     public static final String PINOT_SEGMENT_KEY = "PINOT__SEGMENT_KEY";
     public static final String PINOT_INPUT_FORMAT = "PINOT__INPUT_FORMAT";

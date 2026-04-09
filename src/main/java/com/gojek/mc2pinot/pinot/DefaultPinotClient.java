@@ -9,16 +9,28 @@ import java.net.http.HttpResponse;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.Collections;
+import java.util.Map;
+import java.util.Set;
 import java.util.UUID;
 
 public class DefaultPinotClient implements PinotClient {
 
+    private static final Set<String> RESERVED_UPLOAD_HEADERS = Set.of("content-type");
+    private static final Set<String> RESERVED_UPLOAD_FROM_URI_HEADERS = Set.of("content-type", "upload_type", "download_uri");
+
     private final String host;
     private final HttpClient httpClient;
+    private final Map<String, String> customHeaders;
 
     public DefaultPinotClient(String host, HttpClient httpClient) {
+        this(host, httpClient, Collections.emptyMap());
+    }
+
+    public DefaultPinotClient(String host, HttpClient httpClient, Map<String, String> customHeaders) {
         this.host = host;
         this.httpClient = httpClient;
+        this.customHeaders = customHeaders == null ? Collections.emptyMap() : customHeaders;
     }
 
     @Override
@@ -36,8 +48,9 @@ public class DefaultPinotClient implements PinotClient {
         byte[] fileBytes = Files.readAllBytes(segmentFile);
         byte[] body = buildMultipartBody(boundary, fileName, fileBytes);
 
-        HttpRequest request = HttpRequest.newBuilder()
-                .uri(URI.create(url))
+        HttpRequest.Builder requestBuilder = HttpRequest.newBuilder().uri(URI.create(url));
+        applyCustomHeaders(requestBuilder, RESERVED_UPLOAD_HEADERS);
+        HttpRequest request = requestBuilder
                 .header("Content-Type", "multipart/form-data; boundary=" + boundary)
                 .POST(HttpRequest.BodyPublishers.ofByteArray(body))
                 .build();
@@ -83,8 +96,9 @@ public class DefaultPinotClient implements PinotClient {
 
         String body = (customPayload == null || customPayload.isBlank()) ? "{}" : customPayload;
 
-        HttpRequest request = HttpRequest.newBuilder()
-                .uri(URI.create(url))
+        HttpRequest.Builder requestBuilder = HttpRequest.newBuilder().uri(URI.create(url));
+        applyCustomHeaders(requestBuilder, RESERVED_UPLOAD_FROM_URI_HEADERS);
+        HttpRequest request = requestBuilder
                 .header("Content-Type", "application/json")
                 .header("UPLOAD_TYPE", "URI")
                 .header("DOWNLOAD_URI", uri)
@@ -130,6 +144,14 @@ public class DefaultPinotClient implements PinotClient {
             return tableName.substring(0, tableName.length() - suffix.length());
         }
         return tableName;
+    }
+
+    private void applyCustomHeaders(HttpRequest.Builder builder, Set<String> reserved) {
+        customHeaders.forEach((name, value) -> {
+            if (!reserved.contains(name.toLowerCase())) {
+                builder.header(name, value);
+            }
+        });
     }
 }
 

@@ -30,6 +30,17 @@ class PinotConfigTest {
         assertEquals("/path/to/tableConfig.json", config.getTableConfigFilePath());
         assertNull(config.getDeepStorageURI());
         assertNull(config.getDeepStorageOssConfig());
+        assertNull(config.getCustomHeadersPath());
+    }
+
+    @Test
+    void shouldReturnCustomHeadersPath() {
+        Map<String, String> env = buildValidEnv();
+        env.put("PINOT__CUSTOM_HEADERS_PATH", "/path/to/headers.json");
+
+        PinotConfig config = new PinotConfig(env);
+
+        assertEquals("/path/to/headers.json", config.getCustomHeadersPath());
     }
 
     @Test
