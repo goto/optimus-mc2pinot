@@ -37,6 +37,7 @@ import java.net.http.HttpClient;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Paths;
+import java.security.SecureRandom;
 import java.util.List;
 import java.util.Map;
 import java.util.logging.Handler;
@@ -141,13 +142,19 @@ public class Main {
         LOG.info("success");
     }
 
-    private static String buildSegmentFolderURI(String deepStorageURI, String tableName, String segmentKey) {
+    static String buildSegmentFolderURI(String deepStorageURI, String tableName, String segmentKey) {
         String base = (deepStorageURI == null || deepStorageURI.isBlank())
                 ? "file:///tmp/mc2pinot"
                 : deepStorageURI.endsWith("/")
                 ? deepStorageURI.substring(0, deepStorageURI.length() - 1)
                 : deepStorageURI;
-        return base + "/" + tableName + "/segments_" + segmentKey;
+        byte[] bytes = new byte[4];
+        new SecureRandom().nextBytes(bytes);
+        StringBuilder hex = new StringBuilder(8);
+        for (byte b : bytes) {
+            hex.append(String.format("%02x", b));
+        }
+        return base + "/" + tableName + "/segments_" + segmentKey + "-" + hex;
     }
 
     private static Odps buildOdpsClient(MaxcomputeConfig config) {
