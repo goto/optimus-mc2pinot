@@ -73,6 +73,9 @@ public class Main {
                     mcConfig.getOssRoleArn(),
                     pinotConfig.getInputFormat());
 
+            Thread shutdownHook = new Thread(mcUnloader::kill, "mc-shutdown-hook");
+            Runtime.getRuntime().addShutdownHook(shutdownHook);
+
             new OSSCleaner(mcOssClient).clean(mcConfig.getOssDestinationURI() + "/");
             mcUnloader.unload(query, mcConfig.getOssDestinationURI());
 
