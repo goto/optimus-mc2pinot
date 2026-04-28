@@ -4,7 +4,8 @@ public class HashCodePartitionFunction implements PartitionFunction {
 
     @Override
     public int partition(String value, int numPartitions) {
-        return (value.hashCode() & Integer.MAX_VALUE) % numPartitions;
+        return new org.apache.pinot.segment.spi.partition.HashCodePartitionFunction(numPartitions)
+                .getPartition(value);
     }
 }
 
