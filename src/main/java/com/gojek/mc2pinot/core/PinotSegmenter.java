@@ -150,7 +150,7 @@ public class PinotSegmenter {
     }
 
     private BuildResult buildSegment(RecordReader recordReader, String segmentName, Path outputDir) throws Exception {
-        SegmentGeneratorConfig config = new SegmentGeneratorConfig(tableConfig, schema);
+        SegmentGeneratorConfig config = new SegmentGeneratorConfig(tableConfig, schema, true);
         config.setOutDir(outputDir.toAbsolutePath().toString());
         config.setSegmentName(segmentName);
 
