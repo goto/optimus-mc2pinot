@@ -56,7 +56,7 @@ class PinotSegmenterTest {
                 .thenAnswer(inv -> "oss://bucket/segments/" + inv.getArgument(0));
 
         PinotSegmenter segmenter = new PinotSegmenter(
-                reader, writer, "12345", "json", schema, tableConfig, partitionFunction);
+                reader, writer, "12345", "json", schema, tableConfig, partitionFunction, 4);
 
         GenerationResult result = segmenter.generateSegment();
         List<SegmentInfo> segments = result.segments();
@@ -86,7 +86,7 @@ class PinotSegmenterTest {
                 .thenAnswer(inv -> "oss://bucket/segments/" + inv.getArgument(0));
 
         PinotSegmenter segmenter = new PinotSegmenter(
-                reader, writer, "99", "json", schema, tableConfig, partitionFunction);
+                reader, writer, "99", "json", schema, tableConfig, partitionFunction, 4);
 
         GenerationResult result = segmenter.generateSegment();
 
@@ -99,7 +99,7 @@ class PinotSegmenterTest {
         when(reader.read()).thenThrow(new IOException("OSS connection failed"));
 
         PinotSegmenter segmenter = new PinotSegmenter(
-                reader, writer, "key", "json", schema, tableConfig, partitionFunction);
+                reader, writer, "key", "json", schema, tableConfig, partitionFunction, 4);
 
         assertThrows(IOException.class, segmenter::generateSegment);
     }
@@ -112,7 +112,7 @@ class PinotSegmenterTest {
                 .thenThrow(new IOException("OSS upload failed"));
 
         PinotSegmenter segmenter = new PinotSegmenter(
-                reader, writer, "key", "json", schema, tableConfig, partitionFunction);
+                reader, writer, "key", "json", schema, tableConfig, partitionFunction, 4);
 
         assertThrows(IOException.class, segmenter::generateSegment);
     }

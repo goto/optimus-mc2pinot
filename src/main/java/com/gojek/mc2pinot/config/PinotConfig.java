@@ -14,6 +14,7 @@ public class PinotConfig {
     private final String tableConfigFilePath;
     private final String deepStorageURI;
     private final OSSConfig deepStorageOssConfig;
+    private final int uploadPoolSize;
 
     public PinotConfig(Map<String, String> env) {
         this.host = ConfigHelper.requireNonEmpty(env, Constant.PINOT_HOST);
@@ -26,6 +27,8 @@ public class PinotConfig {
         this.deepStorageURI = env.get(Constant.PINOT_DEEP_STORAGE_URI);
         String scheme = resolveScheme(deepStorageURI);
         this.deepStorageOssConfig = "oss".equals(scheme) ? new OSSConfig(env) : null;
+        this.uploadPoolSize = Math.max(1, Math.min(16,
+                Integer.parseInt(ConfigHelper.optionalWithDefault(env, Constant.PINOT_DEEP_STORAGE_UPLOAD_POOL_SIZE, "4"))));
     }
 
     public String getHost() {
@@ -62,6 +65,10 @@ public class PinotConfig {
 
     public OSSConfig getDeepStorageOssConfig() {
         return deepStorageOssConfig;
+    }
+
+    public int getUploadPoolSize() {
+        return uploadPoolSize;
     }
 
     private static String resolveScheme(String uri) {

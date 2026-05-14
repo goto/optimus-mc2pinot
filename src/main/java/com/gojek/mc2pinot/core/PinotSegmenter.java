@@ -24,6 +24,10 @@ import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.ExecutionException;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
 import java.util.logging.Logger;
 
 public class PinotSegmenter {
@@ -37,10 +41,11 @@ public class PinotSegmenter {
     private final Schema schema;
     private final TableConfig tableConfig;
     private final PartitionFunction partitionFunction;
+    private final int uploadPoolSize;
 
     public PinotSegmenter(Reader reader, Writer writer, String segmentKey,
                           String inputFormat, Schema schema, TableConfig tableConfig,
-                          PartitionFunction partitionFunction) {
+                          PartitionFunction partitionFunction, int uploadPoolSize) {
         this.reader = reader;
         this.writer = writer;
         this.segmentKey = segmentKey;
@@ -48,6 +53,7 @@ public class PinotSegmenter {
         this.schema = schema;
         this.tableConfig = tableConfig;
         this.partitionFunction = partitionFunction;
+        this.uploadPoolSize = uploadPoolSize;
     }
 
     public GenerationResult generateSegment() throws Exception {
@@ -59,7 +65,9 @@ public class PinotSegmenter {
         long inputRecordCount = computeInputRecordCount(dataFiles);
         long inputRecordSize = computeInputRecordSize(dataFiles);
         Path outputDir = Files.createTempDirectory("segment-output-");
-        List<SegmentInfo> results = new ArrayList<>();
+        List<Future<SegmentInfo>> uploadFutures = new ArrayList<>();
+        ExecutorService uploadExecutor = Executors.newFixedThreadPool(
+                Math.min(partitionSpec.count, uploadPoolSize));
 
         try {
             for (int i = 0; i < partitionSpec.count; i++) {
@@ -75,21 +83,40 @@ public class PinotSegmenter {
                     long outputRecordCount = built.totalDocs();
                     long outputRecordSize = built.tarFile().length();
 
-                    LOG.info("transient(oss): upload result segment " + segmentName + " with " + outputRecordCount + " records and size " + outputRecordSize + " bytes");
-                    String remoteURI = writer.write(segmentName + ".tar.gz", built.tarFile().toPath());
-                    results.add(new SegmentInfo(segmentName, remoteURI, built.tarFile().toPath(), outputRecordCount, outputRecordSize));
+                    uploadFutures.add(uploadExecutor.submit(() -> {
+                        LOG.info("transient(core): upload result segment " + segmentName + " with " + outputRecordCount + " records and size " + outputRecordSize + " bytes");
+                        String remoteURI = writer.write(segmentName + ".tar.gz", built.tarFile().toPath());
+                        return new SegmentInfo(segmentName, remoteURI, built.tarFile().toPath(), outputRecordCount, outputRecordSize);
+                    }));
                 }
             }
+
+            LOG.info("transient(core): waiting for segment uploads to complete...");
+            List<SegmentInfo> results = new ArrayList<>();
+            for (Future<SegmentInfo> future : uploadFutures) {
+                try {
+                    results.add(future.get());
+                } catch (ExecutionException e) {
+                    Throwable cause = e.getCause();
+                    if (cause instanceof Exception ex) {
+                        throw ex;
+                    }
+                    throw e;
+                }
+            }
+            LOG.info("transient(core): segment generation completed with " + results.size() + " segments");
+
+            return new GenerationResult(results, inputRecordCount, inputRecordSize);
         } catch (Exception e) {
+            uploadExecutor.shutdownNow();
             deleteDirectory(outputDir.toFile());
             throw e;
         } finally {
+            uploadExecutor.shutdown();
             for (Path dataFile : dataFiles) {
                 Files.deleteIfExists(dataFile);
             }
         }
-
-        return new GenerationResult(results, inputRecordCount, inputRecordSize);
     }
 
     private long computeInputRecordCount(List<Path> dataFiles) {
