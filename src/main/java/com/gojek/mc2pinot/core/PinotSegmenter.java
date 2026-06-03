@@ -24,6 +24,7 @@ import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.logging.Logger;
 
 public class PinotSegmenter {
@@ -188,15 +189,24 @@ public class PinotSegmenter {
             throw new java.io.IOException("Failed to create metadata staging dir: " + metadataSegmentDir);
         }
 
-        for (String fileName : new String[]{"metadata.properties", "creation.meta"}) {
-            File source = new File(segmentDir, fileName);
-            if (source.exists()) {
-                Files.copy(source.toPath(), new File(metadataSegmentDir, fileName).toPath());
-            }
+        Set<String> targetFiles = Set.of("metadata.properties", "creation.meta");
+
+        try (var paths = Files.walk(segmentDir.toPath())) {
+            paths.filter(Files::isRegularFile)
+                    .filter(path -> targetFiles.contains(path.getFileName().toString()))
+                    .forEach(path -> {
+                        try {
+                            Path target = new File(metadataSegmentDir,path.getFileName().toString()).toPath();
+                            Files.copy(path, target);
+                        } catch (Exception e) {
+                            throw new RuntimeException(e);
+                        }
+                    });
         }
 
         File metadataTar = outputDir.resolve(segmentName + ".metadata.tar.gz").toFile();
         createTarGz(metadataSegmentDir, metadataTar);
+        LOG.info("transient(core): created metadata tar.gz for segment " + segmentName + " at " + metadataTar.getAbsolutePath());
         deleteDirectory(metadataDir);
         return metadataTar;
     }
