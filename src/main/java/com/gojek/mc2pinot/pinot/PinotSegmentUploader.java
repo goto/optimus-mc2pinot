@@ -36,6 +36,19 @@ public class PinotSegmentUploader {
                     String payload = payloadSupplier.apply(segment);
                     pinotClient.triggerUploadFromUri(segment.remoteURI(), tableName, payload);
                 }
+                case METADATA -> {
+                    if (segment.remoteURI() == null) {
+                        throw new IllegalArgumentException(
+                                "UploadMode is METADATA but segment has no remote URI: " + segment.segmentName());
+                    }
+                    if (segment.metadataPath() == null) {
+                        throw new IllegalArgumentException(
+                                "UploadMode is METADATA but segment has no metadata file: " + segment.segmentName());
+                    }
+                    String payload = payloadSupplier.apply(segment);
+                    pinotClient.triggerUploadByMetadata(
+                            segment.metadataPath(), segment.remoteURI(), tableName, payload);
+                }
                 case FILE -> {
                     if (segment.localPath() == null) {
                         throw new IllegalArgumentException(
@@ -46,6 +59,9 @@ public class PinotSegmentUploader {
             }
             if (segment.localPath() != null) {
                 Files.deleteIfExists(segment.localPath());
+            }
+            if (segment.metadataPath() != null) {
+                Files.deleteIfExists(segment.metadataPath());
             }
             if (segment.remoteURI() != null) {
                 cleaner.clean(segment.remoteURI());

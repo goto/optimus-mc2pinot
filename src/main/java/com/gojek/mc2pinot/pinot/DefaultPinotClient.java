@@ -18,6 +18,8 @@ public class DefaultPinotClient implements PinotClient {
 
     private static final Set<String> RESERVED_UPLOAD_HEADERS = Set.of("content-type");
     private static final Set<String> RESERVED_UPLOAD_FROM_URI_HEADERS = Set.of("content-type", "upload_type", "download_uri");
+    private static final Set<String> RESERVED_UPLOAD_BY_METADATA_HEADERS =
+            Set.of("content-type", "upload_type", "download_uri", "copy_segment_to_deep_store");
 
     private final String host;
     private final HttpClient httpClient;
@@ -103,6 +105,44 @@ public class DefaultPinotClient implements PinotClient {
                 .header("UPLOAD_TYPE", "URI")
                 .header("DOWNLOAD_URI", uri)
                 .POST(HttpRequest.BodyPublishers.ofString(body, StandardCharsets.UTF_8))
+                .build();
+
+        try {
+            HttpResponse<String> response = httpClient.send(request, HttpResponse.BodyHandlers.ofString());
+            if (response.statusCode() < 200 || response.statusCode() >= 300) {
+                throw new IOException("Pinot upload failed with status " + response.statusCode()
+                        + ": " + response.body());
+            }
+            return response.body();
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            throw new IOException("Pinot upload interrupted", e);
+        }
+    }
+
+    @Override
+    public String triggerUploadByMetadata(Path metadataFile, String uri, String tableName, String customPayload) throws IOException {
+        String tableType = extractTableType(tableName);
+        String baseTableName = extractBaseTableName(tableName, tableType);
+
+        String url = String.format("%s/v2/segments?tableName=%s&tableType=%s",
+                host,
+                URLEncoder.encode(baseTableName, StandardCharsets.UTF_8),
+                URLEncoder.encode(tableType, StandardCharsets.UTF_8));
+
+        String boundary = UUID.randomUUID().toString();
+        String fileName = metadataFile.getFileName().toString();
+        byte[] fileBytes = Files.readAllBytes(metadataFile);
+        byte[] body = buildMultipartBody(boundary, fileName, fileBytes);
+
+        HttpRequest.Builder requestBuilder = HttpRequest.newBuilder().uri(URI.create(url));
+        applyCustomHeaders(requestBuilder, RESERVED_UPLOAD_BY_METADATA_HEADERS);
+        HttpRequest request = requestBuilder
+                .header("Content-Type", "multipart/form-data; boundary=" + boundary)
+                .header("UPLOAD_TYPE", "METADATA")
+                .header("DOWNLOAD_URI", uri)
+                .header("COPY_SEGMENT_TO_DEEP_STORE", "true")
+                .POST(HttpRequest.BodyPublishers.ofByteArray(body))
                 .build();
 
         try {

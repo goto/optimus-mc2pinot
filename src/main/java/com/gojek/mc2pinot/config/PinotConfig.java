@@ -13,6 +13,7 @@ public class PinotConfig {
     private final String schemaFilePath;
     private final String tableConfigFilePath;
     private final String deepStorageURI;
+    private final String deepStorageURIUploadType;
     private final OSSConfig deepStorageOssConfig;
 
     public PinotConfig(Map<String, String> env) {
@@ -24,6 +25,8 @@ public class PinotConfig {
         this.schemaFilePath = ConfigHelper.requireNonEmpty(env, Constant.PINOT_SCHEMA_FILE_PATH);
         this.tableConfigFilePath = ConfigHelper.requireNonEmpty(env, Constant.PINOT_TABLE_CONFIG_FILE_PATH);
         this.deepStorageURI = env.get(Constant.PINOT_DEEP_STORAGE_URI);
+        this.deepStorageURIUploadType = ConfigHelper.optionalWithDefault(
+                env, Constant.PINOT_DEEP_STORAGE_URI_UPLOAD_TYPE, "METADATA").toUpperCase();
         String scheme = resolveScheme(deepStorageURI);
         this.deepStorageOssConfig = "oss".equals(scheme) ? new OSSConfig(env) : null;
     }
@@ -58,6 +61,10 @@ public class PinotConfig {
 
     public String getDeepStorageURI() {
         return deepStorageURI;
+    }
+
+    public String getDeepStorageURIUploadType() {
+        return deepStorageURIUploadType;
     }
 
     public OSSConfig getDeepStorageOssConfig() {

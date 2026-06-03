@@ -77,7 +77,9 @@ public class PinotSegmenter {
 
                     LOG.info("transient(oss): upload result segment " + segmentName + " with " + outputRecordCount + " records and size " + outputRecordSize + " bytes");
                     String remoteURI = writer.write(segmentName + ".tar.gz", built.tarFile().toPath());
-                    results.add(new SegmentInfo(segmentName, remoteURI, built.tarFile().toPath(), outputRecordCount, outputRecordSize));
+                    results.add(new SegmentInfo(segmentName, remoteURI, built.tarFile().toPath(),
+                            built.metadataFile() == null ? null : built.metadataFile().toPath(),
+                            outputRecordCount, outputRecordSize));
                 }
             }
         } catch (Exception e) {
@@ -163,9 +165,10 @@ public class PinotSegmenter {
         createTarGz(segmentDir, tarFile);
 
         long totalDocs = readSegmentTotalDocs(segmentDir);
+        File metadataFile = createMetadataTarGz(segmentDir, segmentName, outputDir);
         deleteDirectory(segmentDir);
 
-        return new BuildResult(tarFile, totalDocs);
+        return new BuildResult(tarFile, metadataFile, totalDocs);
     }
 
     private void createTarGz(File sourceDir, File outputFile) throws Exception {
@@ -176,6 +179,26 @@ public class PinotSegmenter {
             taos.setLongFileMode(TarArchiveOutputStream.LONGFILE_GNU);
             addDirectoryToTar(taos, sourceDir, sourceDir.getName());
         }
+    }
+
+    private File createMetadataTarGz(File segmentDir, String segmentName, Path outputDir) throws Exception {
+        File metadataDir = outputDir.resolve(segmentName + "-metadata").toFile();
+        File metadataSegmentDir = new File(metadataDir, segmentName);
+        if (!metadataSegmentDir.mkdirs()) {
+            throw new java.io.IOException("Failed to create metadata staging dir: " + metadataSegmentDir);
+        }
+
+        for (String fileName : new String[]{"metadata.properties", "creation.meta"}) {
+            File source = new File(segmentDir, fileName);
+            if (source.exists()) {
+                Files.copy(source.toPath(), new File(metadataSegmentDir, fileName).toPath());
+            }
+        }
+
+        File metadataTar = outputDir.resolve(segmentName + ".metadata.tar.gz").toFile();
+        createTarGz(metadataSegmentDir, metadataTar);
+        deleteDirectory(metadataDir);
+        return metadataTar;
     }
 
     private void addDirectoryToTar(TarArchiveOutputStream taos, File source, String entryName) throws Exception {
@@ -215,6 +238,6 @@ public class PinotSegmenter {
     private record PartitionSpec(String column, int count) {
     }
 
-    private record BuildResult(File tarFile, long totalDocs) {
+    private record BuildResult(File tarFile, File metadataFile, long totalDocs) {
     }
 }

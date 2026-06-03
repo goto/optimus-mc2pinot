@@ -107,7 +107,8 @@ public class Main {
                 PayloadTemplateRenderer renderer = new PayloadTemplateRenderer(
                         pinotConfig.getCustomPayloadTemplatePath());
 
-                UploadMode uploadMode = resolveUploadMode(pinotConfig.getDeepStorageURI());
+                UploadMode uploadMode = resolveUploadMode(
+                        pinotConfig.getDeepStorageURI(), pinotConfig.getDeepStorageURIUploadType());
                 LOG.info("resolved upload mode: " + uploadMode);
 
                 HttpClient httpClient = HttpClient.newBuilder()
@@ -188,7 +189,7 @@ public class Main {
         }
     }
 
-    private static UploadMode resolveUploadMode(String deepStorageURI) {
+    private static UploadMode resolveUploadMode(String deepStorageURI, String uriUploadType) {
         if (deepStorageURI == null || deepStorageURI.isBlank()) {
             return UploadMode.FILE;
         }
@@ -197,7 +198,7 @@ public class Main {
             if (scheme == null || "file".equals(scheme)) {
                 return UploadMode.FILE;
             }
-            return UploadMode.URI;
+            return "URI".equalsIgnoreCase(uriUploadType) ? UploadMode.URI : UploadMode.METADATA;
         } catch (IllegalArgumentException e) {
             return UploadMode.FILE;
         }

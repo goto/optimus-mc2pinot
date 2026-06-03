@@ -6,6 +6,7 @@ public record SegmentInfo(
         String segmentName,
         String remoteURI,
         Path localPath,
+        Path metadataPath,
         long outputRecordCount,
         long outputRecordSize
 ) {

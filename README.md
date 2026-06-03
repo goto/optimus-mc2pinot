@@ -78,9 +78,15 @@ Where generated segments are staged before being pushed to Pinot. Segments are w
 ```
 The folder is cleaned before segment generation and again after a successful upload. If `PINOT__DEEP_STORAGE_URI` is not set, segments are written to the local filesystem under `/tmp/mc2pinot/` and uploaded to Pinot directly by local file path.
 
+For remote deep storage, `PINOT__DEEP_STORAGE_URI_UPLOAD_TYPE` controls how the segment is registered with the controller:
+
+- **`METADATA` (default)** — Only the segment's `metadata.properties` and `creation.meta` (a few kilobytes) are extracted locally and uploaded, along with the deep-store `DOWNLOAD_URI` and the header `COPY_SEGMENT_TO_DEEP_STORE: true`. The controller registers the segment **without downloading the full segment**, so controller CPU/memory/network stay near-constant regardless of segment size. This is the recommended mode for large segments.
+- **`URI`** — Only the deep-store `DOWNLOAD_URI` is sent; the controller must **download the entire segment** to read its metadata before registering it, which scales with segment size.
+
 | Variable | Required | Description                                                                                       |
 |---|---|---------------------------------------------------------------------------------------------------|
 | `PINOT__DEEP_STORAGE_URI` | No | Base URI for deep storage. Scheme determines the backend. Defaults to local filesystem.           |
+| `PINOT__DEEP_STORAGE_URI_UPLOAD_TYPE` | No | How segments are registered with the controller when deep storage is remote: `METADATA` (default) or `URI`. Ignored for local/`file://` storage, which always uses direct file upload. |
 | `PINOT__DEEP_STORAGE_OSS_SERVICE_ACCOUNT` | ✅ if `oss://` | OSS credentials for writing segments (`access_key_id`, `access_key_secret`, `endpoint`, `region`) |
 | `PINOT__DEEP_STORAGE_OSS_WRITER_TASK_NUMBER` | No | Number of parallel writer tasks for OSS (default: 5)                                              |
 | `PINOT__DEEP_STORAGE_GCS_SERVICE_ACCOUNT` | ✅ if `gs://` | GCS credentials *(not yet implemented)*                                                           |
