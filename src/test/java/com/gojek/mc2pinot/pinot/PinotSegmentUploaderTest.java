@@ -112,7 +112,6 @@ class PinotSegmentUploaderTest {
 
         verify(pinotClient).triggerUpload(localFile, "my_table_OFFLINE");
         assertFalse(Files.exists(localFile));
-        verify(cleaner).clean("oss://bucket/segments/seg_0.tar.gz");
         verifyNoMoreInteractions(pinotClient);
         verifyNoMoreInteractions(cleaner);
     }
@@ -160,7 +159,6 @@ class PinotSegmentUploaderTest {
         verify(pinotClient).triggerUploadByMetadata(
                 meta0, "oss://bucket/segments/seg_0.tar.gz", "my_table_OFFLINE", "{}");
         assertFalse(Files.exists(meta0));
-        verify(cleaner).clean("oss://bucket/segments/seg_0.tar.gz");
         verifyNoMoreInteractions(pinotClient);
         verifyNoMoreInteractions(cleaner);
     }

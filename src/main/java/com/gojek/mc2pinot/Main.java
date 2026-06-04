@@ -118,27 +118,23 @@ public class Main {
                         new CustomHeadersLoader(pinotConfig.getCustomHeadersPath()).load();
                 PinotClient pinotClient = new DefaultPinotClient(pinotConfig.getHost(), httpClient, customHeaders);
                 PinotSegmentUploader uploader = new PinotSegmentUploader(pinotClient, uploadMode, fs.cleaner());
-                try {
-                    uploader.upload(segments, tableName, segment -> {
-                        SegmentPayloadContext ctx = new SegmentPayloadContext(
-                                inputRecordCount,
-                                inputRecordSize,
-                                tableName,
-                                segment.segmentName(),
-                                segment.outputRecordCount(),
-                                segment.outputRecordSize()
-                        );
-                        try {
-                            return renderer.render(ctx);
-                        } catch (IOException e) {
-                            throw new RuntimeException("Failed to render payload template for segment "
-                                    + segment.segmentName(), e);
-                        }
-                    });
-                    new OSSCleaner(mcOssClient).clean(mcConfig.getOssDestinationURI() + "/");
-                } finally {
-                    fs.cleaner().clean(segmentFolderURI + "/");
-                }
+                uploader.upload(segments, tableName, segment -> {
+                    SegmentPayloadContext ctx = new SegmentPayloadContext(
+                            inputRecordCount,
+                            inputRecordSize,
+                            tableName,
+                            segment.segmentName(),
+                            segment.outputRecordCount(),
+                            segment.outputRecordSize()
+                    );
+                    try {
+                        return renderer.render(ctx);
+                    } catch (IOException e) {
+                        throw new RuntimeException("Failed to render payload template for segment "
+                                + segment.segmentName(), e);
+                    }
+                });
+                new OSSCleaner(mcOssClient).clean(mcConfig.getOssDestinationURI() + "/");
             }
         } finally {
             mcOssClient.shutdown();

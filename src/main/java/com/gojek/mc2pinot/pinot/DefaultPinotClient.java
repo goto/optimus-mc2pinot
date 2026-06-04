@@ -141,7 +141,7 @@ public class DefaultPinotClient implements PinotClient {
                 .header("Content-Type", "multipart/form-data; boundary=" + boundary)
                 .header("UPLOAD_TYPE", "METADATA")
                 .header("DOWNLOAD_URI", uri)
-                .header("COPY_SEGMENT_TO_DEEP_STORE", "true")
+                .header("COPY_SEGMENT_TO_DEEP_STORE", "false")
                 .POST(HttpRequest.BodyPublishers.ofByteArray(body))
                 .build();
 

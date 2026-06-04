@@ -76,8 +76,8 @@ public class PinotSegmenter {
                     long outputRecordCount = built.totalDocs();
                     long outputRecordSize = built.tarFile().length();
 
-                    LOG.info("transient(oss): upload result segment " + segmentName + " with " + outputRecordCount + " records and size " + outputRecordSize + " bytes");
                     String remoteURI = writer.write(segmentName + ".tar.gz", built.tarFile().toPath());
+                    LOG.info("transient(oss): upload result segment " + segmentName + " with " + outputRecordCount + " records and size " + outputRecordSize + " bytes" + " to " + remoteURI);
                     results.add(new SegmentInfo(segmentName, remoteURI, built.tarFile().toPath(),
                             built.metadataFile() == null ? null : built.metadataFile().toPath(),
                             outputRecordCount, outputRecordSize));
@@ -206,7 +206,6 @@ public class PinotSegmenter {
 
         File metadataTar = outputDir.resolve(segmentName + ".metadata.tar.gz").toFile();
         createTarGz(metadataSegmentDir, metadataTar);
-        LOG.info("transient(core): created metadata tar.gz for segment " + segmentName + " at " + metadataTar.getAbsolutePath());
         deleteDirectory(metadataDir);
         return metadataTar;
     }
