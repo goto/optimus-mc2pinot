@@ -25,6 +25,10 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.concurrent.ExecutionException;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
 import java.util.logging.Logger;
 
 public class PinotSegmenter {
@@ -62,31 +66,60 @@ public class PinotSegmenter {
         Path outputDir = Files.createTempDirectory("segment-output-");
         List<SegmentInfo> results = new ArrayList<>();
 
+        // Parallelism is capped at CPU count so at most N segments are built/uploaded
+        // simultaneously — memory growth is bounded proportionally to available cores.
+        int parallelism = Math.min(partitionSpec.count,
+                Runtime.getRuntime().availableProcessors());
+        ExecutorService executor = Executors.newFixedThreadPool(parallelism, r -> {
+            Thread t = new Thread(r, "segment-builder");
+            t.setDaemon(true);
+            return t;
+        });
+
+        List<Future<SegmentInfo>> futures = new ArrayList<>(partitionSpec.count);
         try {
             for (int i = 0; i < partitionSpec.count; i++) {
-                String segmentName = tableName + "_" + segmentKey + "_" + i;
-                LOG.info("transient(core): create segment for segment " + segmentName);
+                final int partitionId = i;
+                final String segmentName = tableName + "_" + segmentKey + "_" + partitionId;
+                LOG.info("transient(core): scheduling segment build for " + segmentName);
 
-                try (PartitionFilteringRecordReader filterReader = new PartitionFilteringRecordReader(
-                        dataFiles, inputFormat, schema.getPhysicalColumnNames(),
-                        i, partitionSpec.count, partitionSpec.column, partitionFunction)) {
+                futures.add(executor.submit(() -> {
+                    try (PartitionFilteringRecordReader filterReader = new PartitionFilteringRecordReader(
+                            dataFiles, inputFormat, schema.getPhysicalColumnNames(),
+                            partitionId, partitionSpec.count, partitionSpec.column, partitionFunction)) {
 
-                    BuildResult built = buildSegment(filterReader, segmentName, outputDir);
+                        BuildResult built = buildSegment(filterReader, segmentName, outputDir);
 
-                    long outputRecordCount = built.totalDocs();
-                    long outputRecordSize = built.tarFile().length();
+                        long outputRecordCount = built.totalDocs();
+                        long outputRecordSize = built.tarFile().length();
 
-                    String remoteURI = writer.write(segmentName + ".tar.gz", built.tarFile().toPath());
-                    LOG.info("transient(oss): upload result segment " + segmentName + " with " + outputRecordCount + " records and size " + outputRecordSize + " bytes" + " to " + remoteURI);
-                    results.add(new SegmentInfo(segmentName, remoteURI, built.tarFile().toPath(),
-                            built.metadataFile() == null ? null : built.metadataFile().toPath(),
-                            outputRecordCount, outputRecordSize));
+                        String remoteURI = writer.write(segmentName + ".tar.gz", built.tarFile().toPath());
+                        LOG.info("transient(oss): upload result segment " + segmentName
+                                + " with " + outputRecordCount + " records and size "
+                                + outputRecordSize + " bytes to " + remoteURI);
+                        return new SegmentInfo(segmentName, remoteURI, built.tarFile().toPath(),
+                                built.metadataFile() == null ? null : built.metadataFile().toPath(),
+                                outputRecordCount, outputRecordSize);
+                    }
+                }));
+            }
+
+            // Collect results; preserve submission order in the result list.
+            for (Future<SegmentInfo> future : futures) {
+                try {
+                    results.add(future.get());
+                } catch (ExecutionException e) {
+                    // Cancel remaining work so threads stop promptly, then rethrow.
+                    futures.forEach(f -> f.cancel(true));
+                    Throwable cause = e.getCause();
+                    throw (cause instanceof Exception ex) ? ex : new RuntimeException(cause);
                 }
             }
         } catch (Exception e) {
             deleteDirectory(outputDir.toFile());
             throw e;
         } finally {
+            executor.shutdownNow();
             for (Path dataFile : dataFiles) {
                 Files.deleteIfExists(dataFile);
             }

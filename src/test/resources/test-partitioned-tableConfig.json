@@ -1,0 +1,28 @@
+{
+  "tableName": "test_table_OFFLINE",
+  "tableType": "OFFLINE",
+  "segmentsConfig": {
+    "replication": "1",
+    "schemaName": "test_table",
+    "timeColumnName": "ts",
+    "timeType": "DAYS",
+    "segmentPushType": "REFRESH"
+  },
+  "tableIndexConfig": {
+    "loadMode": "MMAP",
+    "segmentPartitionConfig": {
+      "columnPartitionMap": {
+        "id": {
+          "functionName": "Modulo",
+          "numPartitions": 2
+        }
+      }
+    }
+  },
+  "tenants": {
+    "broker": "DefaultTenant",
+    "server": "DefaultTenant"
+  },
+  "metadata": {}
+}
+
