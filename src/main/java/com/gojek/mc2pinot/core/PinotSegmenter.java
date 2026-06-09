@@ -10,18 +10,9 @@ import com.gojek.mc2pinot.core.splitter.JsonFileSplitter;
 import com.gojek.mc2pinot.core.splitter.ParquetFileSplitter;
 import com.gojek.mc2pinot.io.Reader;
 import com.gojek.mc2pinot.io.Writer;
-import org.apache.avro.file.DataFileReader;
-import org.apache.avro.file.DataFileWriter;
-import org.apache.avro.generic.GenericDatumReader;
-import org.apache.avro.generic.GenericDatumWriter;
-import org.apache.avro.generic.GenericRecord;
 import org.apache.commons.compress.archivers.tar.TarArchiveEntry;
 import org.apache.commons.compress.archivers.tar.TarArchiveOutputStream;
 import org.apache.commons.compress.compressors.gzip.GzipCompressorOutputStream;
-import org.apache.parquet.avro.AvroParquetReader;
-import org.apache.parquet.avro.AvroParquetWriter;
-import org.apache.parquet.hadoop.ParquetWriter;
-import org.apache.parquet.hadoop.metadata.CompressionCodecName;
 import org.apache.pinot.plugin.inputformat.avro.AvroRecordReader;
 import org.apache.pinot.plugin.inputformat.json.JSONRecordReader;
 import org.apache.pinot.plugin.inputformat.parquet.ParquetRecordReader;
@@ -32,7 +23,6 @@ import org.apache.pinot.spi.config.table.ColumnPartitionConfig;
 import org.apache.pinot.spi.config.table.SegmentPartitionConfig;
 import org.apache.pinot.spi.config.table.TableConfig;
 import org.apache.pinot.spi.data.Schema;
-import org.apache.pinot.spi.data.readers.GenericRow;
 import org.apache.pinot.spi.data.readers.RecordReader;
 
 import java.io.*;
@@ -43,6 +33,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.*;
+import java.util.concurrent.*;
 import java.util.logging.Logger;
 
 public class PinotSegmenter {
@@ -56,10 +47,28 @@ public class PinotSegmenter {
     private final Schema schema;
     private final TableConfig tableConfig;
     private final PartitionFunction partitionFunction;
+    /** Number of threads used for both the split phase and the segment-build phase. */
+    private final int parallelism;
 
+    /** Convenience constructor – parallelism defaults to the number of available CPU cores. */
     public PinotSegmenter(Reader reader, Writer writer, String segmentKey,
                           String inputFormat, Schema schema, TableConfig tableConfig,
                           PartitionFunction partitionFunction) {
+        this(reader, writer, segmentKey, inputFormat, schema, tableConfig, partitionFunction,
+                Runtime.getRuntime().availableProcessors());
+    }
+
+    /**
+     * Full constructor.
+     *
+     * @param parallelism maximum number of threads used concurrently in both the split
+     *                    phase (one thread per input file) and the segment-build phase
+     *                    (one thread per partition).  Pass {@code 1} to disable parallelism.
+     */
+    public PinotSegmenter(Reader reader, Writer writer, String segmentKey,
+                          String inputFormat, Schema schema, TableConfig tableConfig,
+                          PartitionFunction partitionFunction, int parallelism) {
+        if (parallelism < 1) throw new IllegalArgumentException("parallelism must be >= 1");
         this.reader = reader;
         this.writer = writer;
         this.segmentKey = segmentKey;
@@ -67,13 +76,15 @@ public class PinotSegmenter {
         this.schema = schema;
         this.tableConfig = tableConfig;
         this.partitionFunction = partitionFunction;
+        this.parallelism = parallelism;
     }
 
     public GenerationResult generateSegment() throws Exception {
         String tableName = tableConfig.getTableName();
         PartitionSpec partitionSpec = extractPartitionSpec();
 
-        LOG.info("transient(core): start generating " + partitionSpec.count() + " segments...");
+        LOG.info("transient(core): start generating " + partitionSpec.count()
+                + " segments with parallelism=" + parallelism + "...");
 
         List<Path> dataFiles = reader.read();
         long inputRecordSize = computeInputRecordSize(dataFiles);
@@ -85,41 +96,23 @@ public class PinotSegmenter {
         long inputRecordCount = 0;
 
         try {
-            LOG.info("transient(core): split input files into " + partitionSpec.count() + " partitions...");
-            Map<Integer, List<Path>> splitFiles = splitInputFiles(
-                    dataFiles, splitDir, partitionSpec);
+            LOG.info("transient(core): split " + dataFiles.size()
+                    + " input files into " + partitionSpec.count() + " partitions...");
+            Map<Integer, List<Path>> splitFiles =
+                    splitInputFilesParallel(dataFiles, splitDir, partitionSpec);
 
             for (List<Path> paths : splitFiles.values()) {
                 inputRecordCount += countRecordsInFiles(paths);
             }
-
             LOG.info("transient(core): read " + dataFiles.size() + " input files with total "
-                    + inputRecordCount + " records and " + inputRecordSize + " bytes" );
+                    + inputRecordCount + " records and " + inputRecordSize + " bytes");
 
-            for (int i = 0; i < partitionSpec.count(); i++) {
-                String segmentName = tableName + "_" + segmentKey + "_" + i;
-                LOG.info("transient(core): create segment for segment " + segmentName);
-
-                List<Path> partFiles = splitFiles.getOrDefault(i, Collections.emptyList());
-
-                try (RecordReader nativeReader = createNativeRecordReader(partFiles)) {
-                    BuildResult built = buildSegment(nativeReader, segmentName, outputDir);
-                    long outputRecordCount = built.totalDocs();
-                    long outputRecordSize = built.tarFile().length();
-
-                    String remoteURI = writer.write(segmentName + ".tar.gz", built.tarFile().toPath());
-                    LOG.info("transient(oss): upload result segment " + segmentName + " with " + outputRecordCount + " records and size " + outputRecordSize + " bytes" + " to " + remoteURI);
-                    results.add(new SegmentInfo(segmentName, remoteURI, built.tarFile().toPath(),
-                            built.metadataFile() == null ? null : built.metadataFile().toPath(),
-                            outputRecordCount, outputRecordSize));
-                }
-            }
+            results = buildSegmentsParallel(splitFiles, partitionSpec, tableName, outputDir);
 
         } catch (Exception e) {
             deleteDirectory(outputDir.toFile());
             throw e;
         } finally {
-            // clean up split temp files and original downloads
             deleteDirectory(splitDir.toFile());
             for (Path dataFile : dataFiles) {
                 Files.deleteIfExists(dataFile);
@@ -130,27 +123,115 @@ public class PinotSegmenter {
     }
 
     /**
-     * Reads every input file once and fans out rows into per-partition temp files.
-     *
-     * @return map from partitionId → list of split temp files for that partition
+     * Splits every input file in parallel.  Each file gets its own isolated
+     * sub-directory and its own {@link FileSplitter} instance (the splitters are
+     * stateful and not thread-safe, so one-per-file is required).  The per-file
+     * results are merged into a single {@code partitionId → [paths]} map.
      */
-    private Map<Integer, List<Path>> splitInputFiles(
+    private Map<Integer, List<Path>> splitInputFilesParallel(
             List<Path> dataFiles, Path splitDir, PartitionSpec spec) throws Exception {
 
-        FileSplitter splitter = createFileSplitter(spec, splitDir);
-        try {
-            for (Path file : dataFiles) {
-                splitter.split(file);
-            }
-        } finally {
-            splitter.close();
+        int threads = Math.min(dataFiles.size(), parallelism);
+        ExecutorService executor = Executors.newFixedThreadPool(Math.max(threads, 1));
+
+        List<CompletableFuture<Map<Integer, List<Path>>>> futures = new ArrayList<>();
+        for (int i = 0; i < dataFiles.size(); i++) {
+            final Path file = dataFiles.get(i);
+            // Each file gets its own sub-directory so splitters never share output paths.
+            final Path fileDir = splitDir.resolve("file-" + i);
+            Files.createDirectories(fileDir);
+
+            CompletableFuture<Map<Integer, List<Path>>> future = CompletableFuture.supplyAsync(() -> {
+                FileSplitter splitter = createFileSplitter(spec, fileDir);
+                try {
+                    splitter.split(file);
+                    splitter.close();
+                    return splitter.splitFiles();
+                } catch (Exception e) {
+                    try { splitter.close(); } catch (Exception ignored) {}
+                    throw new CompletionException(e);
+                }
+            }, executor);
+
+            futures.add(future);
         }
-        return splitter.splitFiles();
+
+        executor.shutdown();
+        // Merge results from all futures
+        Map<Integer, List<Path>> merged = new HashMap<>();
+        try {
+            for (CompletableFuture<Map<Integer, List<Path>>> future : futures) {
+                Map<Integer, List<Path>> partial = future.get();
+                for (Map.Entry<Integer, List<Path>> entry : partial.entrySet()) {
+                    merged.computeIfAbsent(entry.getKey(), k -> new ArrayList<>())
+                          .addAll(entry.getValue());
+                }
+            }
+        } catch (ExecutionException e) {
+            Throwable cause = e.getCause();
+            throw (cause instanceof Exception) ? (Exception) cause : new RuntimeException(cause);
+        } finally {
+            executor.shutdownNow();
+        }
+        return merged;
     }
 
     /**
-     * Factory that picks the right {@link FileSplitter} based on {@link #inputFormat}.
+     * Builds and uploads one segment per partition, all concurrently.
      */
+    private List<SegmentInfo> buildSegmentsParallel(
+            Map<Integer, List<Path>> splitFiles,
+            PartitionSpec partitionSpec,
+            String tableName,
+            Path outputDir) throws Exception {
+
+        String tableNameVal = tableName;
+        int threads = Math.min(partitionSpec.count(), parallelism);
+        ExecutorService executor = Executors.newFixedThreadPool(Math.max(threads, 1));
+
+        List<CompletableFuture<SegmentInfo>> futures = new ArrayList<>();
+        for (int i = 0; i < partitionSpec.count(); i++) {
+            final int partitionId = i;
+            final String segmentName = tableNameVal + "_" + segmentKey + "_" + partitionId;
+            final List<Path> partFiles =
+                    splitFiles.getOrDefault(partitionId, Collections.emptyList());
+
+            CompletableFuture<SegmentInfo> future = CompletableFuture.supplyAsync(() -> {
+                LOG.info("transient(core): create segment " + segmentName);
+                try (RecordReader nativeReader = createNativeRecordReader(partFiles)) {
+                    BuildResult built = buildSegment(nativeReader, segmentName, outputDir);
+                    long outputRecordCount = built.totalDocs();
+                    long outputRecordSize = built.tarFile().length();
+
+                    String remoteURI = writer.write(segmentName + ".tar.gz", built.tarFile().toPath());
+                    LOG.info("transient(oss): upload result segment " + segmentName + " with " + outputRecordCount + " records and size " + outputRecordSize + " bytes" + " to " + remoteURI);
+                    return new SegmentInfo(segmentName, remoteURI, built.tarFile().toPath(),
+                            built.metadataFile() == null ? null : built.metadataFile().toPath(),
+                            outputRecordCount, outputRecordSize)
+                } catch (Exception e) {
+                    throw new CompletionException(e);
+                }
+            }, executor);
+
+            futures.add(future);
+        }
+
+        executor.shutdown();
+        List<SegmentInfo> results = new ArrayList<>();
+        try {
+            for (CompletableFuture<SegmentInfo> future : futures) {
+                results.add(future.get());
+            }
+        } catch (ExecutionException e) {
+            Throwable cause = e.getCause();
+            throw (cause instanceof Exception) ? (Exception) cause : new RuntimeException(cause);
+        } finally {
+            executor.shutdownNow();
+        }
+        return results;
+    }
+
+    /** Factory that picks the right {@link FileSplitter} based on {@link #inputFormat}. */
     private FileSplitter createFileSplitter(PartitionSpec spec, Path splitDir) {
         switch (inputFormat) {
             case "avro":
@@ -165,9 +246,8 @@ public class PinotSegmenter {
     }
 
     /**
-     * Creates a built-in Pinot {@link RecordReader} for all split files of one
-     * partition, concatenating them via a simple {@link ConcatenatingRecordReader}.
-     * If the list is empty an empty reader is returned.
+     * Creates a Pinot {@link RecordReader} over all split files for one partition,
+     * concatenating them via {@link ConcatenatingRecordReader}.
      */
     private RecordReader createNativeRecordReader(List<Path> partFiles) throws Exception {
         if (partFiles.isEmpty()) {
@@ -178,13 +258,10 @@ public class PinotSegmenter {
         Set<String> fields = new HashSet<>(schema.getPhysicalColumnNames());
 
         for (Path file : partFiles) {
-            RecordReader rr = instantiateNativeReader(file, fields);
-            readers.add(rr);
+            readers.add(instantiateNativeReader(file, fields));
         }
 
-        return readers.size() == 1
-                ? readers.get(0)
-                : new ConcatenatingRecordReader(readers);
+        return readers.size() == 1 ? readers.get(0) : new ConcatenatingRecordReader(readers);
     }
 
     private RecordReader instantiateNativeReader(Path file, Set<String> fields) throws Exception {
@@ -257,10 +334,6 @@ public class PinotSegmenter {
         return total;
     }
 
-    /**
-     * Counts rows in a list of already-split files of the current format.
-     * Cheap: files are already small (one partition's worth of data).
-     */
     private long countRecordsInFiles(List<Path> files) {
         long count = 0;
         Set<String> fields = new HashSet<>(schema.getPhysicalColumnNames());
@@ -268,7 +341,8 @@ public class PinotSegmenter {
             try (RecordReader rr = instantiateNativeReader(file, fields)) {
                 while (rr.hasNext()) { rr.next(); count++; }
             } catch (Exception e) {
-                LOG.warning("transient(core): could not count records in " + file + ": " + e.getMessage());
+                LOG.warning("transient(core): could not count records in " + file
+                        + ": " + e.getMessage());
             }
         }
         return count;
