@@ -12,6 +12,7 @@ import org.junit.jupiter.api.extension.ExtendWith;
 import org.junit.jupiter.api.io.TempDir;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+
 import java.io.IOException;
 import java.io.InputStream;
 import java.nio.charset.StandardCharsets;
@@ -33,20 +34,21 @@ class PinotSegmenterTest {
     @Mock
     private Writer writer;
 
-    @Mock
-    private PartitionFunction partitionFunction;
-
     @TempDir
     Path tempDir;
 
     private Schema schema;
     private TableConfig tableConfig;
+    private TableConfig partitionedTableConfig;
 
     @BeforeEach
     void setUp() throws Exception {
         schema = loadSchema("/test-schema.json");
         tableConfig = loadTableConfig("/test-tableConfig.json");
+        partitionedTableConfig = loadTableConfig("/test-tableConfig-partitioned.json");
     }
+
+    // ── single-partition (no partition config) ────────────────────────────────
 
     @Test
     void shouldGenerateSegmentFromJsonData() throws Exception {
@@ -56,7 +58,8 @@ class PinotSegmenterTest {
                 .thenAnswer(inv -> "oss://bucket/segments/" + inv.getArgument(0));
 
         PinotSegmenter segmenter = new PinotSegmenter(
-                reader, writer, "12345", "json", schema, tableConfig, partitionFunction);
+                reader, writer, "12345", "json", schema, tableConfig,
+                /* partitionFunction not needed for non-partitioned */ null);
 
         GenerationResult result = segmenter.generateSegment();
         List<SegmentInfo> segments = result.segments();
@@ -78,7 +81,7 @@ class PinotSegmenterTest {
     }
 
     @Test
-    void shouldGenerateMultipleSegmentsWithNoPartitionConfig() throws Exception {
+    void shouldMergeMultipleInputFilesIntoOneSegmentWhenNoPartitionConfig() throws Exception {
         Path dataFile1 = createTestDataFile("data1.json");
         Path dataFile2 = createTestDataFile("data2.json");
         when(reader.read()).thenReturn(List.of(dataFile1, dataFile2));
@@ -86,20 +89,95 @@ class PinotSegmenterTest {
                 .thenAnswer(inv -> "oss://bucket/segments/" + inv.getArgument(0));
 
         PinotSegmenter segmenter = new PinotSegmenter(
-                reader, writer, "99", "json", schema, tableConfig, partitionFunction);
+                reader, writer, "99", "json", schema, tableConfig, null);
 
         GenerationResult result = segmenter.generateSegment();
 
+        // Both files go to partition-0 → exactly one segment
         assertEquals(1, result.segments().size());
+        assertEquals("test_table_OFFLINE_99_0", result.segments().get(0).segmentName());
+        // 2 records per file × 2 files
+        assertEquals(4, result.segments().get(0).outputRecordCount());
         verify(writer, times(1)).write(anyString(), any(Path.class));
+        // Reader is called exactly once (single pass)
+        verify(reader, times(1)).read();
     }
+
+    // ── partitioned table config ──────────────────────────────────────────────
+
+    @Test
+    void shouldGenerateTwoSegmentsForPartitionedTableConfig() throws Exception {
+        // With 2 partitions all records land in 0 or 1; use a real modulo function
+        // so we can predict routing: "a".hashCode() % 2 and "b".hashCode() % 2 differ
+        PartitionFunction modulo = (value, numPartitions) ->
+                Math.abs(value.hashCode()) % numPartitions;
+
+        // Write 4 records with IDs designed to hit both partitions
+        Path dataFile = tempDir.resolve("data.json");
+        Files.writeString(dataFile,
+                "{\"id\":\"a\",\"name\":\"Alice\",\"value\":1,\"ts\":1700000000000}\n" +
+                "{\"id\":\"b\",\"name\":\"Bob\",\"value\":2,\"ts\":1700000000000}\n" +
+                "{\"id\":\"c\",\"name\":\"Carol\",\"value\":3,\"ts\":1700000000000}\n" +
+                "{\"id\":\"d\",\"name\":\"Dave\",\"value\":4,\"ts\":1700000000000}\n",
+                StandardCharsets.UTF_8);
+
+        when(reader.read()).thenReturn(List.of(dataFile));
+        when(writer.write(anyString(), any(Path.class)))
+                .thenAnswer(inv -> "oss://bucket/segments/" + inv.getArgument(0));
+
+        PinotSegmenter segmenter = new PinotSegmenter(
+                reader, writer, "42", "json", schema, partitionedTableConfig, modulo);
+
+        GenerationResult result = segmenter.generateSegment();
+
+        // Must produce exactly 2 segments (one per partition)
+        assertEquals(2, result.segments().size());
+
+        long totalOutputRecords = result.segments().stream()
+                .mapToLong(SegmentInfo::outputRecordCount)
+                .sum();
+        // All 4 input records should be present across the two segments
+        assertEquals(4, totalOutputRecords);
+
+        // Reader was invoked once → single-pass guarantee
+        verify(reader, times(1)).read();
+        // Writer called twice, once per segment
+        verify(writer, times(2)).write(anyString(), any(Path.class));
+    }
+
+    @Test
+    void shouldGenerateSegmentsEvenWhenOnePartitionIsEmpty() throws Exception {
+        // Force all records into partition 0 by always returning 0
+        PartitionFunction alwaysZero = (value, numPartitions) -> 0;
+
+        Path dataFile = createTestDataFile();
+        when(reader.read()).thenReturn(List.of(dataFile));
+        when(writer.write(anyString(), any(Path.class)))
+                .thenAnswer(inv -> "oss://bucket/segments/" + inv.getArgument(0));
+
+        PinotSegmenter segmenter = new PinotSegmenter(
+                reader, writer, "55", "json", schema, partitionedTableConfig, alwaysZero);
+
+        GenerationResult result = segmenter.generateSegment();
+
+        assertEquals(2, result.segments().size());
+
+        long totalRecords = result.segments().stream()
+                .mapToLong(SegmentInfo::outputRecordCount).sum();
+        assertEquals(2, totalRecords); // 2 records, all in partition 0; partition 1 = empty segment
+
+        verify(reader, times(1)).read();
+        verify(writer, times(2)).write(anyString(), any(Path.class));
+    }
+
+    // ── error propagation ─────────────────────────────────────────────────────
 
     @Test
     void shouldPropagateReaderException() throws Exception {
         when(reader.read()).thenThrow(new IOException("OSS connection failed"));
 
         PinotSegmenter segmenter = new PinotSegmenter(
-                reader, writer, "key", "json", schema, tableConfig, partitionFunction);
+                reader, writer, "key", "json", schema, tableConfig, null);
 
         assertThrows(IOException.class, segmenter::generateSegment);
     }
@@ -112,10 +190,12 @@ class PinotSegmenterTest {
                 .thenThrow(new IOException("OSS upload failed"));
 
         PinotSegmenter segmenter = new PinotSegmenter(
-                reader, writer, "key", "json", schema, tableConfig, partitionFunction);
+                reader, writer, "key", "json", schema, tableConfig, null);
 
         assertThrows(IOException.class, segmenter::generateSegment);
     }
+
+    // ── helpers ───────────────────────────────────────────────────────────────
 
     private Path createTestDataFile() throws IOException {
         return createTestDataFile("test-data.json");
