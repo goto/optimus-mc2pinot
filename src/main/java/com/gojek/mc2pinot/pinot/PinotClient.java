@@ -9,6 +9,8 @@ public interface PinotClient {
 
     String triggerUploadFromUri(String uri, String tableName, String customPayload) throws IOException;
 
+    String triggerUploadByMetadata(Path metadataFile, String uri, String tableName, String customPayload) throws IOException;
+
     String getSchema(String tableName) throws IOException;
 
     String getTableConfig(String tableName) throws IOException;

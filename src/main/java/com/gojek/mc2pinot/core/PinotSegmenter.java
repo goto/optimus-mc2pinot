@@ -30,6 +30,10 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.*;
 import java.util.concurrent.*;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.Map;
+import java.util.Set;
 import java.util.logging.Logger;
 
 public class PinotSegmenter {
@@ -199,14 +203,11 @@ public class PinotSegmenter {
                     long outputRecordCount = built.totalDocs();
                     long outputRecordSize = built.tarFile().length();
 
-                    LOG.info("transient(oss): upload result segment " + segmentName
-                            + " with " + outputRecordCount + " records and size "
-                            + outputRecordSize + " bytes");
-
-                    String remoteURI = writer.write(segmentName + ".tar.gz",
-                            built.tarFile().toPath());
-                    return new SegmentInfo(segmentName, remoteURI,
-                            built.tarFile().toPath(), outputRecordCount, outputRecordSize);
+                    String remoteURI = writer.write(segmentName + ".tar.gz", built.tarFile().toPath());
+                    LOG.info("transient(oss): upload result segment " + segmentName + " with " + outputRecordCount + " records and size " + outputRecordSize + " bytes" + " to " + remoteURI);
+                    return new SegmentInfo(segmentName, remoteURI, built.tarFile().toPath(),
+                            built.metadataFile() == null ? null : built.metadataFile().toPath(),
+                            outputRecordCount, outputRecordSize);
                 } catch (Exception e) {
                     throw new CompletionException(e);
                 }
@@ -301,8 +302,9 @@ public class PinotSegmenter {
         createTarGz(segmentDir, tarFile);
 
         long totalDocs = readSegmentTotalDocs(segmentDir);
+        File metadataFile = createMetadataTarGz(segmentDir, segmentName, outputDir);
         deleteDirectory(segmentDir);
-        return new BuildResult(tarFile, totalDocs);
+        return new BuildResult(tarFile, metadataFile, totalDocs);
     }
 
     private PartitionSpec extractPartitionSpec() {
@@ -366,6 +368,34 @@ public class PinotSegmenter {
         }
     }
 
+    private File createMetadataTarGz(File segmentDir, String segmentName, Path outputDir) throws Exception {
+        File metadataDir = outputDir.resolve(segmentName + "-metadata").toFile();
+        File metadataSegmentDir = new File(metadataDir, segmentName);
+        if (!metadataSegmentDir.mkdirs()) {
+            throw new java.io.IOException("Failed to create metadata staging dir: " + metadataSegmentDir);
+        }
+
+        Set<String> targetFiles = Set.of("metadata.properties", "creation.meta");
+
+        try (var paths = Files.walk(segmentDir.toPath())) {
+            paths.filter(Files::isRegularFile)
+                    .filter(path -> targetFiles.contains(path.getFileName().toString()))
+                    .forEach(path -> {
+                        try {
+                            Path target = new File(metadataSegmentDir,path.getFileName().toString()).toPath();
+                            Files.copy(path, target);
+                        } catch (Exception e) {
+                            throw new RuntimeException(e);
+                        }
+                    });
+        }
+
+        File metadataTar = outputDir.resolve(segmentName + ".metadata.tar.gz").toFile();
+        createTarGz(metadataSegmentDir, metadataTar);
+        deleteDirectory(metadataDir);
+        return metadataTar;
+    }
+
     private void addDirectoryToTar(TarArchiveOutputStream taos,
                                    File source, String entryName) throws Exception {
         TarArchiveEntry entry = new TarArchiveEntry(source, entryName);
@@ -398,5 +428,6 @@ public class PinotSegmenter {
         dir.delete();
     }
 
-    private record BuildResult(File tarFile, long totalDocs) {}
+    private record BuildResult(File tarFile, File metadataFile, long totalDocs) {
+    }
 }
