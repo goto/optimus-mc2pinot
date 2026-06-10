@@ -47,8 +47,19 @@ public class PinotSegmenter {
     private final Schema schema;
     private final TableConfig tableConfig;
     private final PartitionFunction partitionFunction;
-    /** Number of threads used for both the split phase and the segment-build phase. */
-    private final int parallelism;
+    /**
+     * Max concurrent file splits.  Each concurrent split holds {@code numPartitions}
+     * Parquet/Avro/JSON writers in memory simultaneously, so keeping this low is
+     * the primary lever for controlling peak RAM in the split phase.
+     */
+    private final int splitParallelism;
+
+    /**
+     * Max concurrent segment builds.  Each Pinot
+     * {@link SegmentIndexCreationDriverImpl} build loads its full partition into
+     * memory, so this controls peak RAM in the build phase.
+     */
+    private final int buildParallelism;
 
     /** Convenience constructor – parallelism defaults to the number of available CPU cores. */
     public PinotSegmenter(Reader reader, Writer writer, String segmentKey,
@@ -59,16 +70,33 @@ public class PinotSegmenter {
     }
 
     /**
-     * Full constructor.
+     * Single-parallelism constructor (backward-compatible).
+     * Split concurrency is automatically capped at {@code min(parallelism, 2)} because
+     * each concurrent split keeps {@code numPartitions} writer buffers alive in RAM.
+     * Build concurrency uses the full {@code parallelism} value.
      *
-     * @param parallelism maximum number of threads used concurrently in both the split
-     *                    phase (one thread per input file) and the segment-build phase
-     *                    (one thread per partition).  Pass {@code 1} to disable parallelism.
+     * @param parallelism desired level of concurrency; pass {@code 1} to disable parallelism
      */
     public PinotSegmenter(Reader reader, Writer writer, String segmentKey,
                           String inputFormat, Schema schema, TableConfig tableConfig,
                           PartitionFunction partitionFunction, int parallelism) {
-        if (parallelism < 1) throw new IllegalArgumentException("parallelism must be >= 1");
+        this(reader, writer, segmentKey, inputFormat, schema, tableConfig, partitionFunction,
+                Math.min(parallelism, 2), parallelism);
+    }
+
+    /**
+     * Full constructor with independent control over split and build concurrency.
+     *
+     * @param splitParallelism  max concurrent input-file splits (keep small to limit
+     *                          the number of open partition writers in RAM)
+     * @param buildParallelism  max concurrent segment builds
+     */
+    public PinotSegmenter(Reader reader, Writer writer, String segmentKey,
+                          String inputFormat, Schema schema, TableConfig tableConfig,
+                          PartitionFunction partitionFunction,
+                          int splitParallelism, int buildParallelism) {
+        if (splitParallelism < 1) throw new IllegalArgumentException("splitParallelism must be >= 1");
+        if (buildParallelism < 1) throw new IllegalArgumentException("buildParallelism must be >= 1");
         this.reader = reader;
         this.writer = writer;
         this.segmentKey = segmentKey;
@@ -76,7 +104,8 @@ public class PinotSegmenter {
         this.schema = schema;
         this.tableConfig = tableConfig;
         this.partitionFunction = partitionFunction;
-        this.parallelism = parallelism;
+        this.splitParallelism = splitParallelism;
+        this.buildParallelism = buildParallelism;
     }
 
     public GenerationResult generateSegment() throws Exception {
@@ -84,7 +113,8 @@ public class PinotSegmenter {
         PartitionSpec partitionSpec = extractPartitionSpec();
 
         LOG.info("transient(core): start generating " + partitionSpec.count()
-                + " segments with parallelism=" + parallelism + "...");
+                + " segments with splitParallelism=" + splitParallelism
+                + " buildParallelism=" + buildParallelism + "...");
 
         List<Path> dataFiles = reader.read();
         long inputRecordSize = computeInputRecordSize(dataFiles);
@@ -131,7 +161,7 @@ public class PinotSegmenter {
     private Map<Integer, List<Path>> splitInputFilesParallel(
             List<Path> dataFiles, Path splitDir, PartitionSpec spec) throws Exception {
 
-        int threads = Math.min(dataFiles.size(), parallelism);
+        int threads = Math.min(dataFiles.size(), splitParallelism);
         ExecutorService executor = Executors.newFixedThreadPool(Math.max(threads, 1));
 
         List<CompletableFuture<Map<Integer, List<Path>>>> futures = new ArrayList<>();
@@ -186,7 +216,7 @@ public class PinotSegmenter {
             Path outputDir) throws Exception {
 
         String tableNameVal = tableName;
-        int threads = Math.min(partitionSpec.count(), parallelism);
+        int threads = Math.min(partitionSpec.count(), buildParallelism);
         ExecutorService executor = Executors.newFixedThreadPool(Math.max(threads, 1));
 
         List<CompletableFuture<SegmentInfo>> futures = new ArrayList<>();

@@ -72,10 +72,13 @@ public class ParquetFileSplitter implements FileSplitter {
             outputPaths.put(partId, out);
             org.apache.hadoop.fs.Path hadoopOut =
                     new org.apache.hadoop.fs.Path(out.toUri());
+            // Use a small row-group size (16 MB instead of the 128 MB default) so that
+            // each concurrent ParquetWriter only buffers a bounded amount of data in RAM.
             ParquetWriter<GenericRecord> w = AvroParquetWriter
                     .<GenericRecord>builder(hadoopOut)
                     .withSchema(avroSchema)
                     .withCompressionCodec(CompressionCodecName.SNAPPY)
+                    .withRowGroupSize(16L * 1024 * 1024)
                     .build();
             writers.put(partId, w);
         }
