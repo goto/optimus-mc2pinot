@@ -107,7 +107,8 @@ public class Main {
                 PayloadTemplateRenderer renderer = new PayloadTemplateRenderer(
                         pinotConfig.getCustomPayloadTemplatePath());
 
-                UploadMode uploadMode = resolveUploadMode(pinotConfig.getDeepStorageURI());
+                UploadMode uploadMode = resolveUploadMode(
+                        pinotConfig.getDeepStorageURI(), pinotConfig.getDeepStorageURIUploadType());
                 LOG.info("resolved upload mode: " + uploadMode);
 
                 HttpClient httpClient = HttpClient.newBuilder()
@@ -117,27 +118,23 @@ public class Main {
                         new CustomHeadersLoader(pinotConfig.getCustomHeadersPath()).load();
                 PinotClient pinotClient = new DefaultPinotClient(pinotConfig.getHost(), httpClient, customHeaders);
                 PinotSegmentUploader uploader = new PinotSegmentUploader(pinotClient, uploadMode, fs.cleaner());
-                try {
-                    uploader.upload(segments, tableName, segment -> {
-                        SegmentPayloadContext ctx = new SegmentPayloadContext(
-                                inputRecordCount,
-                                inputRecordSize,
-                                tableName,
-                                segment.segmentName(),
-                                segment.outputRecordCount(),
-                                segment.outputRecordSize()
-                        );
-                        try {
-                            return renderer.render(ctx);
-                        } catch (IOException e) {
-                            throw new RuntimeException("Failed to render payload template for segment "
-                                    + segment.segmentName(), e);
-                        }
-                    });
-                    new OSSCleaner(mcOssClient).clean(mcConfig.getOssDestinationURI() + "/");
-                } finally {
-                    fs.cleaner().clean(segmentFolderURI + "/");
-                }
+                uploader.upload(segments, tableName, segment -> {
+                    SegmentPayloadContext ctx = new SegmentPayloadContext(
+                            inputRecordCount,
+                            inputRecordSize,
+                            tableName,
+                            segment.segmentName(),
+                            segment.outputRecordCount(),
+                            segment.outputRecordSize()
+                    );
+                    try {
+                        return renderer.render(ctx);
+                    } catch (IOException e) {
+                        throw new RuntimeException("Failed to render payload template for segment "
+                                + segment.segmentName(), e);
+                    }
+                });
+                new OSSCleaner(mcOssClient).clean(mcConfig.getOssDestinationURI() + "/");
             }
         } finally {
             mcOssClient.shutdown();
@@ -188,7 +185,7 @@ public class Main {
         }
     }
 
-    private static UploadMode resolveUploadMode(String deepStorageURI) {
+    private static UploadMode resolveUploadMode(String deepStorageURI, String uriUploadType) {
         if (deepStorageURI == null || deepStorageURI.isBlank()) {
             return UploadMode.FILE;
         }
@@ -197,7 +194,7 @@ public class Main {
             if (scheme == null || "file".equals(scheme)) {
                 return UploadMode.FILE;
             }
-            return UploadMode.URI;
+            return "URI".equalsIgnoreCase(uriUploadType) ? UploadMode.URI : UploadMode.METADATA;
         } catch (IllegalArgumentException e) {
             return UploadMode.FILE;
         }
