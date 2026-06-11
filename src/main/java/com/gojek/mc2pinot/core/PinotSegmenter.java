@@ -413,7 +413,7 @@ public class PinotSegmenter {
                     .forEach(path -> {
                         try {
                             Path target = new File(metadataSegmentDir,path.getFileName().toString()).toPath();
-                            Files.copy(path, target);
+                            Files.copy(path, target, java.nio.file.StandardCopyOption.COPY_ATTRIBUTES);
                         } catch (Exception e) {
                             throw new RuntimeException(e);
                         }
