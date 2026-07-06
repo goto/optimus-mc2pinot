@@ -19,6 +19,18 @@ public class ConfigHelper {
         return (value == null || value.isBlank()) ? defaultValue : value;
     }
 
+    public static long optionalLongWithDefault(Map<String, String> env, String key, long defaultValue) {
+        String value = env.get(key);
+        if (value == null || value.isBlank()) {
+            return defaultValue;
+        }
+        try {
+            return Long.parseLong(value.trim());
+        } catch (NumberFormatException e) {
+            throw new IllegalArgumentException("Invalid numeric value for " + key + ": " + value, e);
+        }
+    }
+
     public static String requireJsonField(JsonObject json, String key, String field) {
         if (!json.has(field) || json.get(field).getAsString().isBlank()) {
             throw new IllegalArgumentException("Missing required field in " + key + ": " + field);

@@ -14,7 +14,10 @@ public class PinotConfig {
     private final String tableConfigFilePath;
     private final String deepStorageURI;
     private final String deepStorageURIUploadType;
+    private final long segmentPushDelayInSeconds;
     private final OSSConfig deepStorageOssConfig;
+
+    private static final long DEFAULT_SEGMENT_PUSH_DELAY_IN_SECONDS = 30L;
 
     public PinotConfig(Map<String, String> env) {
         this.host = ConfigHelper.requireNonEmpty(env, Constant.PINOT_HOST);
@@ -27,6 +30,8 @@ public class PinotConfig {
         this.deepStorageURI = env.get(Constant.PINOT_DEEP_STORAGE_URI);
         this.deepStorageURIUploadType = ConfigHelper.optionalWithDefault(
                 env, Constant.PINOT_DEEP_STORAGE_URI_UPLOAD_TYPE, "METADATA").toUpperCase();
+        this.segmentPushDelayInSeconds = ConfigHelper.optionalLongWithDefault(
+                env, Constant.PINOT_SEGMENT_PUSH_DELAY_IN_SECONDS, DEFAULT_SEGMENT_PUSH_DELAY_IN_SECONDS);
         String scheme = resolveScheme(deepStorageURI);
         this.deepStorageOssConfig = "oss".equals(scheme) ? new OSSConfig(env) : null;
     }
@@ -65,6 +70,10 @@ public class PinotConfig {
 
     public String getDeepStorageURIUploadType() {
         return deepStorageURIUploadType;
+    }
+
+    public long getSegmentPushDelayInSeconds() {
+        return segmentPushDelayInSeconds;
     }
 
     public OSSConfig getDeepStorageOssConfig() {
