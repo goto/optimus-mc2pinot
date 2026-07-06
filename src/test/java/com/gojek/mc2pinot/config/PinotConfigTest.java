@@ -86,6 +86,43 @@ class PinotConfigTest {
     }
 
     @Test
+    void shouldDefaultSegmentPushDelayTo30Seconds() {
+        PinotConfig config = new PinotConfig(buildValidEnv());
+
+        assertEquals(30L, config.getSegmentPushDelayInSeconds());
+    }
+
+    @Test
+    void shouldReadConfiguredSegmentPushDelay() {
+        Map<String, String> env = buildValidEnv();
+        env.put("PINOT__SEGMENT_PUSH_DELAY_IN_SECONDS", "5");
+
+        PinotConfig config = new PinotConfig(env);
+
+        assertEquals(5L, config.getSegmentPushDelayInSeconds());
+    }
+
+    @Test
+    void shouldAllowZeroSegmentPushDelay() {
+        Map<String, String> env = buildValidEnv();
+        env.put("PINOT__SEGMENT_PUSH_DELAY_IN_SECONDS", "0");
+
+        PinotConfig config = new PinotConfig(env);
+
+        assertEquals(0L, config.getSegmentPushDelayInSeconds());
+    }
+
+    @Test
+    void shouldThrowWhenSegmentPushDelayIsNotNumeric() {
+        Map<String, String> env = buildValidEnv();
+        env.put("PINOT__SEGMENT_PUSH_DELAY_IN_SECONDS", "abc");
+
+        IllegalArgumentException ex = assertThrows(IllegalArgumentException.class,
+                () -> new PinotConfig(env));
+        assertTrue(ex.getMessage().contains("PINOT__SEGMENT_PUSH_DELAY_IN_SECONDS"));
+    }
+
+    @Test
     void shouldThrowWhenHostMissing() {
         Map<String, String> env = buildValidEnv();
         env.remove("PINOT__HOST");

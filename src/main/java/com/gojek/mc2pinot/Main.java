@@ -117,7 +117,8 @@ public class Main {
                 Map<String, String> customHeaders =
                         new CustomHeadersLoader(pinotConfig.getCustomHeadersPath()).load();
                 PinotClient pinotClient = new DefaultPinotClient(pinotConfig.getHost(), httpClient, customHeaders);
-                PinotSegmentUploader uploader = new PinotSegmentUploader(pinotClient, uploadMode, fs.cleaner());
+                PinotSegmentUploader uploader = new PinotSegmentUploader(
+                        pinotClient, uploadMode, fs.cleaner(), pinotConfig.getSegmentPushDelayInSeconds());
                 uploader.upload(segments, tableName, segment -> {
                     SegmentPayloadContext ctx = new SegmentPayloadContext(
                             inputRecordCount,

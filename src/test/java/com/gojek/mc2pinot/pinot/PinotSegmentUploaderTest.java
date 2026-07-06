@@ -231,6 +231,49 @@ class PinotSegmentUploaderTest {
     }
 
     @Test
+    void shouldDelayBetweenSegmentPushesButNotBeforeTheFirst() throws IOException {
+        long delaySeconds = 1;
+        PinotSegmentUploader uploader =
+                new PinotSegmentUploader(pinotClient, UploadMode.URI, cleaner, delaySeconds);
+        List<SegmentInfo> segments = List.of(
+                new SegmentInfo("seg_0", "oss://bucket/segments/seg_0.tar.gz", null, null, 10, 1024),
+                new SegmentInfo("seg_1", "oss://bucket/segments/seg_1.tar.gz", null, null, 20, 2048),
+                new SegmentInfo("seg_2", "oss://bucket/segments/seg_2.tar.gz", null, null, 30, 3072)
+        );
+
+        when(pinotClient.triggerUploadFromUri(anyString(), anyString(), anyString())).thenReturn("ok");
+
+        long start = System.nanoTime();
+        uploader.upload(segments, "my_table_OFFLINE", fixedPayload);
+        long elapsedMs = (System.nanoTime() - start) / 1_000_000;
+
+        // Delay applies only between the 3 pushes -> 2 delays.
+        long expectedMs = 2 * delaySeconds * 1000L;
+        assertTrue(elapsedMs >= expectedMs,
+                "expected at least " + expectedMs + "ms elapsed, got " + elapsedMs);
+        verify(pinotClient, times(3)).triggerUploadFromUri(anyString(), anyString(), anyString());
+    }
+
+    @Test
+    void shouldNotDelayForSingleSegment() throws IOException {
+        long delaySeconds = 5;
+        PinotSegmentUploader uploader =
+                new PinotSegmentUploader(pinotClient, UploadMode.URI, cleaner, delaySeconds);
+        List<SegmentInfo> segments = List.of(
+                new SegmentInfo("seg_0", "oss://bucket/segments/seg_0.tar.gz", null, null, 10, 1024)
+        );
+
+        when(pinotClient.triggerUploadFromUri(anyString(), anyString(), anyString())).thenReturn("ok");
+
+        long start = System.nanoTime();
+        uploader.upload(segments, "my_table_OFFLINE", fixedPayload);
+        long elapsedMs = (System.nanoTime() - start) / 1_000_000;
+
+        assertTrue(elapsedMs < delaySeconds * 1000L,
+                "single segment should not incur delay, got " + elapsedMs + "ms");
+    }
+
+    @Test
     void shouldCleanAlreadyUploadedSegmentsBeforeMidBatchFailure() throws IOException {
         PinotSegmentUploader uploader = new PinotSegmentUploader(pinotClient, UploadMode.URI, cleaner);
         List<SegmentInfo> segments = List.of(
