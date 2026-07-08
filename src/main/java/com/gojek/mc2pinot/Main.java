@@ -96,7 +96,8 @@ public class Main {
 
                 PinotSegmenter segmenter = new PinotSegmenter(
                         ossReader, fs.writer(), pinotConfig.getSegmentKey(),
-                        pinotConfig.getInputFormat(), schema, tableConfig, partitionFunction);
+                        pinotConfig.getInputFormat(), schema, tableConfig, partitionFunction)
+                        .setSegmentCount(pinotConfig.getSegmentCount());
 
                 GenerationResult result = segmenter.generateSegment();
                 List<SegmentInfo> segments = result.segments();

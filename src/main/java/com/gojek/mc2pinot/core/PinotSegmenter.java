@@ -61,6 +61,13 @@ public class PinotSegmenter {
      */
     private final int buildParallelism;
 
+    /**
+     * Configured number of physical segments to emit. {@code 0} (the default) means
+     * "fall back to the table's partition count", preserving the original behaviour.
+     * Set via {@link #setSegmentCount(int)}.
+     */
+    private int segmentCount = 0;
+
     /** Convenience constructor – parallelism defaults to the number of available CPU cores. */
     public PinotSegmenter(Reader reader, Writer writer, String segmentKey,
                           String inputFormat, Schema schema, TableConfig tableConfig,
@@ -108,12 +115,22 @@ public class PinotSegmenter {
         this.buildParallelism = buildParallelism;
     }
 
+    /**
+     * Sets the desired number of physical segments (S). Pass {@code <= 0} to fall back to the
+     * table's partition count (P). Returns {@code this} for fluent chaining.
+     */
+    public PinotSegmenter setSegmentCount(int segmentCount) {
+        this.segmentCount = segmentCount;
+        return this;
+    }
+
     public GenerationResult generateSegment() throws Exception {
         String tableName = tableConfig.getTableName();
         PartitionSpec partitionSpec = extractPartitionSpec();
 
         LOG.info("transient(core): start generating " + partitionSpec.count()
-                + " segments with splitParallelism=" + splitParallelism
+                + " segments (partitionCount=" + partitionSpec.partitionCount()
+                + ") with splitParallelism=" + splitParallelism
                 + " buildParallelism=" + buildParallelism + "...");
 
         List<Path> dataFiles = reader.read();
@@ -127,7 +144,7 @@ public class PinotSegmenter {
 
         try {
             LOG.info("transient(core): split " + dataFiles.size()
-                    + " input files into " + partitionSpec.count() + " partitions...");
+                    + " input files into " + partitionSpec.count() + " segments...");
             Map<Integer, List<Path>> splitFiles =
                     splitInputFilesParallel(dataFiles, splitDir, partitionSpec);
 
@@ -353,7 +370,9 @@ public class PinotSegmenter {
                 numPartitions = entry.getValue().getNumPartitions();
             }
         }
-        return new PartitionSpec(partitionColumn, numPartitions);
+        // S defaults to P (backward compatible) unless PINOT__SEGMENT_COUNT was configured.
+        int resolvedSegmentCount = segmentCount > 0 ? segmentCount : numPartitions;
+        return new PartitionSpec(partitionColumn, numPartitions, resolvedSegmentCount);
     }
 
     private long computeInputRecordSize(List<Path> dataFiles) {

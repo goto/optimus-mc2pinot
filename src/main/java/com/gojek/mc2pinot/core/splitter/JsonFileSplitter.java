@@ -52,7 +52,7 @@ public class JsonFileSplitter implements FileSplitter {
     private int computePartition(GenericRow row) {
         if (spec.column() == null) return 0;
         Object value = row.getValue(spec.column());
-        return partitionFunction.partition(value != null ? value.toString() : "", spec.count());
+        return spec.segmentOf(value != null ? value.toString() : "", partitionFunction);
     }
 
     private BufferedWriter getOrCreateWriter(int partId) throws IOException {

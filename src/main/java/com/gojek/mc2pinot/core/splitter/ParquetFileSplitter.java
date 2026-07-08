@@ -62,7 +62,7 @@ public class ParquetFileSplitter implements FileSplitter {
     private int computePartition(GenericRecord record) {
         if (spec.column() == null) return 0;
         Object value = record.get(spec.column());
-        return partitionFunction.partition(value != null ? value.toString() : "", spec.count());
+        return spec.segmentOf(value != null ? value.toString() : "", partitionFunction);
     }
 
     private ParquetWriter<GenericRecord> getOrCreateWriter(
