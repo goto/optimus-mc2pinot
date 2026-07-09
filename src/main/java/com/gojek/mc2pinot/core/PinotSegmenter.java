@@ -2,6 +2,7 @@ package com.gojek.mc2pinot.core;
 
 import com.gojek.mc2pinot.core.partition.PartitionFunction;
 import com.gojek.mc2pinot.core.partition.PartitionSpec;
+import com.gojek.mc2pinot.core.partition.SegmentAssigner;
 import com.gojek.mc2pinot.core.reader.ConcatenatingRecordReader;
 import com.gojek.mc2pinot.core.reader.EmptyRecordReader;
 import com.gojek.mc2pinot.core.splitter.AvroFileSplitter;
@@ -133,6 +134,10 @@ public class PinotSegmenter {
                 + ") with splitParallelism=" + splitParallelism
                 + " buildParallelism=" + buildParallelism + "...");
 
+        // One assigner shared by all concurrent splitters so the S>P round-robin counters are
+        // global — otherwise many small inputs could each fill only the first sub-segment per pid.
+        SegmentAssigner assigner = new SegmentAssigner(partitionSpec, partitionFunction);
+
         List<Path> dataFiles = reader.read();
         long inputRecordSize = computeInputRecordSize(dataFiles);
 
@@ -146,7 +151,7 @@ public class PinotSegmenter {
             LOG.info("transient(core): split " + dataFiles.size()
                     + " input files into " + partitionSpec.count() + " segments...");
             Map<Integer, List<Path>> splitFiles =
-                    splitInputFilesParallel(dataFiles, splitDir, partitionSpec);
+                    splitInputFilesParallel(dataFiles, splitDir, partitionSpec, assigner);
 
             for (List<Path> paths : splitFiles.values()) {
                 inputRecordCount += countRecordsInFiles(paths);
@@ -172,11 +177,14 @@ public class PinotSegmenter {
     /**
      * Splits every input file in parallel.  Each file gets its own isolated
      * sub-directory and its own {@link FileSplitter} instance (the splitters are
-     * stateful and not thread-safe, so one-per-file is required).  The per-file
-     * results are merged into a single {@code partitionId → [paths]} map.
+     * stateful and not thread-safe, so one-per-file is required).  All splitters share
+     * the single thread-safe {@link SegmentAssigner} so the S&gt;P round-robin counters
+     * are global.  The per-file results are merged into a single
+     * {@code segmentId → [paths]} map.
      */
     private Map<Integer, List<Path>> splitInputFilesParallel(
-            List<Path> dataFiles, Path splitDir, PartitionSpec spec) throws Exception {
+            List<Path> dataFiles, Path splitDir, PartitionSpec spec,
+            SegmentAssigner assigner) throws Exception {
 
         int threads = Math.min(dataFiles.size(), splitParallelism);
         ExecutorService executor = Executors.newFixedThreadPool(Math.max(threads, 1));
@@ -189,7 +197,7 @@ public class PinotSegmenter {
             Files.createDirectories(fileDir);
 
             CompletableFuture<Map<Integer, List<Path>>> future = CompletableFuture.supplyAsync(() -> {
-                FileSplitter splitter = createFileSplitter(spec, fileDir);
+                FileSplitter splitter = createFileSplitter(spec, fileDir, assigner);
                 try {
                     splitter.split(file);
                     splitter.close();
@@ -279,14 +287,14 @@ public class PinotSegmenter {
     }
 
     /** Factory that picks the right {@link FileSplitter} based on {@link #inputFormat}. */
-    private FileSplitter createFileSplitter(PartitionSpec spec, Path splitDir) {
+    private FileSplitter createFileSplitter(PartitionSpec spec, Path splitDir, SegmentAssigner assigner) {
         switch (inputFormat) {
             case "avro":
-                return new AvroFileSplitter(spec, splitDir, schema, partitionFunction);
+                return new AvroFileSplitter(spec, splitDir, schema, assigner);
             case "parquet":
-                return new ParquetFileSplitter(spec, splitDir, schema, partitionFunction);
+                return new ParquetFileSplitter(spec, splitDir, schema, assigner);
             case "json":
-                return new JsonFileSplitter(spec, splitDir, schema, partitionFunction);
+                return new JsonFileSplitter(spec, splitDir, schema, assigner);
             default:
                 throw new IllegalArgumentException("Unsupported input format: " + inputFormat);
         }
