@@ -1,7 +1,7 @@
 package com.gojek.mc2pinot.core.splitter;
 
-import com.gojek.mc2pinot.core.partition.PartitionFunction;
 import com.gojek.mc2pinot.core.partition.PartitionSpec;
+import com.gojek.mc2pinot.core.partition.SegmentAssigner;
 import org.apache.avro.file.DataFileReader;
 import org.apache.avro.file.DataFileWriter;
 import org.apache.avro.generic.GenericDatumReader;
@@ -21,17 +21,17 @@ public class AvroFileSplitter implements FileSplitter {
     private final PartitionSpec spec;
     private final Path splitDir;
     private final Schema pinotSchema;
-    private final PartitionFunction partitionFunction;
+    private final SegmentAssigner assigner;
 
     private final Map<Integer, DataFileWriter<GenericRecord>> writers = new HashMap<>();
     private final Map<Integer, Path> outputPaths = new HashMap<>();
 
     public AvroFileSplitter(PartitionSpec spec, Path splitDir,
-                     Schema pinotSchema, PartitionFunction partitionFunction) {
+                     Schema pinotSchema, SegmentAssigner assigner) {
         this.spec = spec;
         this.splitDir = splitDir;
         this.pinotSchema = pinotSchema;
-        this.partitionFunction = partitionFunction;
+        this.assigner = assigner;
     }
 
     @Override
@@ -52,7 +52,7 @@ public class AvroFileSplitter implements FileSplitter {
     private int computePartition(GenericRecord record) {
         if (spec.column() == null) return 0;
         Object value = record.get(spec.column());
-        return spec.segmentOf(value != null ? value.toString() : "", partitionFunction);
+        return assigner.assign(value != null ? value.toString() : "");
     }
 
     private DataFileWriter<GenericRecord> getOrCreateWriter(
