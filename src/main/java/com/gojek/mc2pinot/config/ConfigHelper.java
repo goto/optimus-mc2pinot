@@ -31,6 +31,18 @@ public class ConfigHelper {
         }
     }
 
+    public static int optionalIntWithDefault(Map<String, String> env, String key, int defaultValue) {
+        String value = env.get(key);
+        if (value == null || value.isBlank()) {
+            return defaultValue;
+        }
+        try {
+            return Integer.parseInt(value.trim());
+        } catch (NumberFormatException e) {
+            throw new IllegalArgumentException("Invalid numeric value for " + key + ": " + value, e);
+        }
+    }
+
     public static String requireJsonField(JsonObject json, String key, String field) {
         if (!json.has(field) || json.get(field).getAsString().isBlank()) {
             throw new IllegalArgumentException("Missing required field in " + key + ": " + field);
