@@ -10,6 +10,8 @@ public class PinotConfig {
     private final String customPayloadTemplatePath;
     private final String segmentKey;
     private final String inputFormat;
+    private final String tableName;
+    private final String schemaName;
     private final String schemaFilePath;
     private final String tableConfigFilePath;
     private final String deepStorageURI;
@@ -28,8 +30,23 @@ public class PinotConfig {
         this.customPayloadTemplatePath = env.get(Constant.PINOT_CUSTOM_PAYLOAD_TEMPLATE_PATH);
         this.segmentKey = ConfigHelper.requireNonEmpty(env, Constant.PINOT_SEGMENT_KEY);
         this.inputFormat = ConfigHelper.requireNonEmpty(env, Constant.PINOT_INPUT_FORMAT);
-        this.schemaFilePath = ConfigHelper.requireNonEmpty(env, Constant.PINOT_SCHEMA_FILE_PATH);
-        this.tableConfigFilePath = ConfigHelper.requireNonEmpty(env, Constant.PINOT_TABLE_CONFIG_FILE_PATH);
+
+        String rawTableName = env.get(Constant.PINOT_TABLE_NAME);
+        this.tableName = (rawTableName == null || rawTableName.isBlank()) ? null : rawTableName.trim();
+        if (this.tableName != null) {
+            // Fetch table config and schema from the Pinot controller REST API.
+            // Schema name defaults to the table name when not explicitly provided.
+            String rawSchemaName = env.get(Constant.PINOT_SCHEMA_NAME);
+            this.schemaName = (rawSchemaName == null || rawSchemaName.isBlank())
+                    ? this.tableName : rawSchemaName.trim();
+            this.schemaFilePath = env.get(Constant.PINOT_SCHEMA_FILE_PATH);
+            this.tableConfigFilePath = env.get(Constant.PINOT_TABLE_CONFIG_FILE_PATH);
+        } else {
+            // Fall back to loading table config and schema from files on disk.
+            this.schemaName = null;
+            this.schemaFilePath = ConfigHelper.requireNonEmpty(env, Constant.PINOT_SCHEMA_FILE_PATH);
+            this.tableConfigFilePath = ConfigHelper.requireNonEmpty(env, Constant.PINOT_TABLE_CONFIG_FILE_PATH);
+        }
         this.deepStorageURI = env.get(Constant.PINOT_DEEP_STORAGE_URI);
         this.deepStorageURIUploadType = ConfigHelper.optionalWithDefault(
                 env, Constant.PINOT_DEEP_STORAGE_URI_UPLOAD_TYPE, "METADATA").toUpperCase();
@@ -63,6 +80,18 @@ public class PinotConfig {
 
     public String getInputFormat() {
         return inputFormat.toLowerCase();
+    }
+
+    public String getTableName() {
+        return tableName;
+    }
+
+    public String getSchemaName() {
+        return schemaName;
+    }
+
+    public boolean isConfigFromApi() {
+        return tableName != null;
     }
 
     public String getSchemaFilePath() {

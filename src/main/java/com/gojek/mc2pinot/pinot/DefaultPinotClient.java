@@ -159,13 +159,38 @@ public class DefaultPinotClient implements PinotClient {
     }
 
     @Override
-    public String getSchema(String tableName) {
-        throw new UnsupportedOperationException("REST-based schema fetch not yet implemented");
+    public String getSchema(String schemaName) throws IOException {
+        String url = String.format("%s/schemas/%s",
+                host, URLEncoder.encode(schemaName, StandardCharsets.UTF_8));
+        return get(url, "schema fetch");
     }
 
     @Override
-    public String getTableConfig(String tableName) {
-        throw new UnsupportedOperationException("REST-based table config fetch not yet implemented");
+    public String getTableConfig(String tableName) throws IOException {
+        String url = String.format("%s/tableConfigs/%s",
+                host, URLEncoder.encode(tableName, StandardCharsets.UTF_8));
+        return get(url, "table config fetch");
+    }
+
+    private String get(String url, String action) throws IOException {
+        HttpRequest.Builder requestBuilder = HttpRequest.newBuilder().uri(URI.create(url));
+        applyCustomHeaders(requestBuilder, Collections.emptySet());
+        HttpRequest request = requestBuilder
+                .header("Accept", "application/json")
+                .GET()
+                .build();
+
+        try {
+            HttpResponse<String> response = httpClient.send(request, HttpResponse.BodyHandlers.ofString());
+            if (response.statusCode() < 200 || response.statusCode() >= 300) {
+                throw new IOException("Pinot " + action + " failed with status " + response.statusCode()
+                        + ": " + response.body());
+            }
+            return response.body();
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            throw new IOException("Pinot " + action + " interrupted", e);
+        }
     }
 
     private String extractTableType(String tableName) {

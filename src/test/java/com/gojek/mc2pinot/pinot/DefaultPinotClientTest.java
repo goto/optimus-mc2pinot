@@ -111,15 +111,73 @@ class DefaultPinotClientTest {
     }
 
     @Test
-    void shouldThrowOnGetSchema() {
-        assertThrows(UnsupportedOperationException.class,
-                () -> pinotClient.getSchema("table"));
+    void shouldFetchSchema() throws Exception {
+        when(httpResponse.statusCode()).thenReturn(200);
+        when(httpResponse.body()).thenReturn("{\"schemaName\":\"my_table\"}");
+        when(httpClient.send(any(HttpRequest.class), any(HttpResponse.BodyHandler.class)))
+                .thenReturn(httpResponse);
+
+        String result = pinotClient.getSchema("my_table");
+
+        assertEquals("{\"schemaName\":\"my_table\"}", result);
+
+        ArgumentCaptor<HttpRequest> captor = ArgumentCaptor.forClass(HttpRequest.class);
+        verify(httpClient).send(captor.capture(), any(HttpResponse.BodyHandler.class));
+
+        HttpRequest request = captor.getValue();
+        assertEquals("GET", request.method());
+        assertEquals("http://localhost:9000/schemas/my_table", request.uri().toString());
+        assertEquals("application/json", request.headers().firstValue("Accept").orElse(""));
     }
 
     @Test
-    void shouldThrowOnGetTableConfig() {
-        assertThrows(UnsupportedOperationException.class,
-                () -> pinotClient.getTableConfig("table"));
+    void shouldFetchTableConfig() throws Exception {
+        when(httpResponse.statusCode()).thenReturn(200);
+        when(httpResponse.body()).thenReturn("{\"tableName\":\"my_table\"}");
+        when(httpClient.send(any(HttpRequest.class), any(HttpResponse.BodyHandler.class)))
+                .thenReturn(httpResponse);
+
+        String result = pinotClient.getTableConfig("my_table");
+
+        assertEquals("{\"tableName\":\"my_table\"}", result);
+
+        ArgumentCaptor<HttpRequest> captor = ArgumentCaptor.forClass(HttpRequest.class);
+        verify(httpClient).send(captor.capture(), any(HttpResponse.BodyHandler.class));
+
+        HttpRequest request = captor.getValue();
+        assertEquals("GET", request.method());
+        assertEquals("http://localhost:9000/tableConfigs/my_table", request.uri().toString());
+        assertEquals("application/json", request.headers().firstValue("Accept").orElse(""));
+    }
+
+    @Test
+    void shouldThrowOnNon2xxResponseForGetSchema() throws Exception {
+        when(httpResponse.statusCode()).thenReturn(404);
+        when(httpResponse.body()).thenReturn("Not Found");
+        when(httpClient.send(any(HttpRequest.class), any(HttpResponse.BodyHandler.class)))
+                .thenReturn(httpResponse);
+
+        IOException ex = assertThrows(IOException.class,
+                () -> pinotClient.getSchema("missing"));
+        assertTrue(ex.getMessage().contains("404"));
+    }
+
+    @Test
+    void shouldSendCustomHeadersOnGetTableConfig() throws Exception {
+        when(httpResponse.statusCode()).thenReturn(200);
+        when(httpResponse.body()).thenReturn("{}");
+        when(httpClient.send(any(HttpRequest.class), any(HttpResponse.BodyHandler.class)))
+                .thenReturn(httpResponse);
+
+        DefaultPinotClient clientWithHeaders = new DefaultPinotClient(
+                "http://localhost:9000", httpClient, Map.of("X-Auth", "secret"));
+
+        clientWithHeaders.getTableConfig("my_table");
+
+        ArgumentCaptor<HttpRequest> captor = ArgumentCaptor.forClass(HttpRequest.class);
+        verify(httpClient).send(captor.capture(), any(HttpResponse.BodyHandler.class));
+
+        assertEquals("secret", captor.getValue().headers().firstValue("X-Auth").orElse(""));
     }
 
     @Test

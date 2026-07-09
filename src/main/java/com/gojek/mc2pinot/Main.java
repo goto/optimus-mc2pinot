@@ -24,6 +24,7 @@ import com.gojek.mc2pinot.pinot.DefaultPinotClient;
 import com.gojek.mc2pinot.pinot.PinotClient;
 import com.gojek.mc2pinot.pinot.PinotSegmentUploader;
 import com.gojek.mc2pinot.pinot.UploadMode;
+import com.fasterxml.jackson.databind.JsonNode;
 import org.apache.pinot.spi.config.table.ColumnPartitionConfig;
 import org.apache.pinot.spi.config.table.SegmentPartitionConfig;
 import org.apache.pinot.spi.config.table.TableConfig;
@@ -79,8 +80,25 @@ public class Main {
             new OSSCleaner(mcOssClient).clean(mcConfig.getOssDestinationURI() + "/");
             mcUnloader.unload(query, mcConfig.getOssDestinationURI());
 
-            Schema schema = loadSchema(pinotConfig.getSchemaFilePath());
-            TableConfig tableConfig = loadTableConfig(pinotConfig.getTableConfigFilePath());
+            HttpClient httpClient = HttpClient.newBuilder()
+                    .version(HttpClient.Version.HTTP_1_1)
+                    .build();
+            Map<String, String> customHeaders =
+                    new CustomHeadersLoader(pinotConfig.getCustomHeadersPath()).load();
+            PinotClient pinotClient = new DefaultPinotClient(pinotConfig.getHost(), httpClient, customHeaders);
+
+            Schema schema;
+            TableConfig tableConfig;
+            if (pinotConfig.isConfigFromApi()) {
+                LOG.info("fetching schema '" + pinotConfig.getSchemaName()
+                        + "' and table config '" + pinotConfig.getTableName() + "' from Pinot API");
+                schema = fetchSchema(pinotClient, pinotConfig.getSchemaName());
+                tableConfig = fetchTableConfig(pinotClient, pinotConfig.getTableName());
+            } else {
+                LOG.info("loading schema and table config from files");
+                schema = loadSchema(pinotConfig.getSchemaFilePath());
+                tableConfig = loadTableConfig(pinotConfig.getTableConfigFilePath());
+            }
             String tableName = tableConfig.getTableName();
 
             String segmentFolderURI = buildSegmentFolderURI(
@@ -118,12 +136,6 @@ public class Main {
                 PayloadTemplateRenderer renderer = new PayloadTemplateRenderer(
                         pinotConfig.getCustomPayloadTemplatePath());
 
-                HttpClient httpClient = HttpClient.newBuilder()
-                        .version(HttpClient.Version.HTTP_1_1)
-                        .build();
-                Map<String, String> customHeaders =
-                        new CustomHeadersLoader(pinotConfig.getCustomHeadersPath()).load();
-                PinotClient pinotClient = new DefaultPinotClient(pinotConfig.getHost(), httpClient, customHeaders);
                 PinotSegmentUploader uploader = new PinotSegmentUploader(
                         pinotClient, uploadMode, fs.cleaner(), pinotConfig.getSegmentPushDelayInSeconds());
                 uploader.upload(segments, tableName, segment -> {
@@ -191,6 +203,34 @@ public class Main {
             String json = new String(is.readAllBytes(), StandardCharsets.UTF_8);
             return JsonUtils.stringToObject(json, TableConfig.class);
         }
+    }
+
+    private static Schema fetchSchema(PinotClient pinotClient, String schemaName) throws IOException {
+        return Schema.fromString(pinotClient.getSchema(schemaName));
+    }
+
+    private static TableConfig fetchTableConfig(PinotClient pinotClient, String tableName) throws IOException {
+        String json = pinotClient.getTableConfig(tableName);
+        return parseTableConfig(json);
+    }
+
+    /**
+     * Parses a table config response. The {@code /tableConfigs/{name}} endpoint returns a
+     * {@code TableConfigs} wrapper ({@code {"tableName", "schema", "offline", "realtime"}}),
+     * so the offline (falling back to realtime) node is extracted. A plain {@code TableConfig}
+     * response is also handled for robustness.
+     */
+    static TableConfig parseTableConfig(String json) throws IOException {
+        JsonNode root = JsonUtils.stringToJsonNode(json);
+        JsonNode offline = root.get("offline");
+        JsonNode realtime = root.get("realtime");
+        if (offline != null && !offline.isNull()) {
+            return JsonUtils.jsonNodeToObject(offline, TableConfig.class);
+        }
+        if (realtime != null && !realtime.isNull()) {
+            return JsonUtils.jsonNodeToObject(realtime, TableConfig.class);
+        }
+        return JsonUtils.jsonNodeToObject(root, TableConfig.class);
     }
 
     private static UploadMode resolveUploadMode(String deepStorageURI, String uriUploadType) {
