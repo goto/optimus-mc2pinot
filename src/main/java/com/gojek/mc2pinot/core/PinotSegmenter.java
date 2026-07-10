@@ -35,6 +35,7 @@ import java.util.Map;
 import java.util.Set;
 import java.util.*;
 import java.util.concurrent.*;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.logging.Logger;
 
 public class PinotSegmenter {
@@ -129,17 +130,21 @@ public class PinotSegmenter {
         String tableName = tableConfig.getTableName();
         PartitionSpec partitionSpec = extractPartitionSpec();
 
-        LOG.info("transient(core): start generating " + partitionSpec.count()
-                + " segments (partitionCount=" + partitionSpec.partitionCount()
-                + ") with splitParallelism=" + splitParallelism
-                + " buildParallelism=" + buildParallelism + "...");
-
         // One assigner shared by all concurrent splitters so the S>P round-robin counters are
         // global — otherwise many small inputs could each fill only the first sub-segment per pid.
         SegmentAssigner assigner = new SegmentAssigner(partitionSpec, partitionFunction);
 
+        LOG.info("transient(core): reading input files...");
         List<Path> dataFiles = reader.read();
         long inputRecordSize = computeInputRecordSize(dataFiles);
+        LOG.info("transient(core): read " + dataFiles.size() + " input files, total input size "
+                + inputRecordSize + " bytes");
+
+        LOG.info("transient(core): start generating " + partitionSpec.count()
+                + " segments (partitionCount=" + partitionSpec.partitionCount()
+                + ") from " + dataFiles.size() + " input files (" + inputRecordSize + " bytes)"
+                + " with splitParallelism=" + splitParallelism
+                + " buildParallelism=" + buildParallelism + "...");
 
         Path splitDir = Files.createTempDirectory("segment-split-");
         Path outputDir = Files.createTempDirectory("segment-output-");
@@ -192,6 +197,11 @@ public class PinotSegmenter {
         int threads = Math.min(dataFiles.size(), splitParallelism);
         ExecutorService executor = Executors.newFixedThreadPool(Math.max(threads, 1));
 
+        // Progress heartbeat: the split phase is otherwise silent for minutes, which is
+        // indistinguishable from a hang and lets log-follow watchers time out.
+        final int totalFiles = dataFiles.size();
+        final AtomicInteger completed = new AtomicInteger();
+
         List<CompletableFuture<Map<Integer, List<Path>>>> futures = new ArrayList<>();
         for (int i = 0; i < dataFiles.size(); i++) {
             final Path file = dataFiles.get(i);
@@ -202,6 +212,8 @@ public class PinotSegmenter {
             CompletableFuture<Map<Integer, List<Path>>> future = CompletableFuture.supplyAsync(() -> {
                 FileSplitter splitter = createFileSplitter(spec, fileDir, assigner);
                 try {
+                    long fileBytes = 0;
+                    try { fileBytes = Files.size(file); } catch (Exception ignored) {}
                     splitter.split(file);
                     splitter.close();
                     Map<Integer, List<Path>> splitFiles = splitter.splitFiles();
@@ -210,6 +222,8 @@ public class PinotSegmenter {
                     // accounted for), so this keeps split-phase disk at ~1x the dataset instead of
                     // holding every input alongside every split until the run ends.
                     deleteFileQuietly(file);
+                    LOG.info("transient(core): split progress " + completed.incrementAndGet()
+                            + "/" + totalFiles + " input files done (last file " + fileBytes + " bytes)");
                     return splitFiles;
                 } catch (Exception e) {
                     try { splitter.close(); } catch (Exception ignored) {}
