@@ -153,6 +153,9 @@ public class PinotSegmenter {
             Map<Integer, List<Path>> splitFiles =
                     splitInputFilesParallel(dataFiles, splitDir, partitionSpec, assigner);
 
+            LOG.info("transient(core): split-phase on-disk footprint " + directorySizeBytes(splitDir)
+                    + " bytes across " + partitionSpec.count() + " segments (inputs freed)");
+
             for (List<Path> paths : splitFiles.values()) {
                 inputRecordCount += countRecordsInFiles(paths);
             }
@@ -201,7 +204,13 @@ public class PinotSegmenter {
                 try {
                     splitter.split(file);
                     splitter.close();
-                    return splitter.splitFiles();
+                    Map<Integer, List<Path>> splitFiles = splitter.splitFiles();
+                    // Free the input copy as soon as it has been re-partitioned into split files.
+                    // Nothing downstream reads the raw input again (record count/size are already
+                    // accounted for), so this keeps split-phase disk at ~1x the dataset instead of
+                    // holding every input alongside every split until the run ends.
+                    deleteFileQuietly(file);
+                    return splitFiles;
                 } catch (Exception e) {
                     try { splitter.close(); } catch (Exception ignored) {}
                     throw new CompletionException(e);
@@ -265,6 +274,13 @@ public class PinotSegmenter {
                             outputRecordCount, outputRecordSize);
                 } catch (Exception e) {
                     throw new CompletionException(e);
+                } finally {
+                    // Free this partition's split files now that its segment is built; these paths
+                    // are unique to this partition, so no other concurrent build needs them. The
+                    // split dir drains as segment output accumulates, keeping peak disk ~1x.
+                    for (Path partFile : partFiles) {
+                        deleteFileQuietly(partFile);
+                    }
                 }
             }, executor);
 
@@ -471,6 +487,26 @@ public class PinotSegmenter {
                     taos.closeArchiveEntry();
                 }
             }
+        }
+    }
+
+    /** Deletes a temp file best-effort; failures are logged, never propagated (runs on worker threads). */
+    private void deleteFileQuietly(Path path) {
+        try {
+            Files.deleteIfExists(path);
+        } catch (Exception e) {
+            LOG.warning("transient(core): could not delete temp file " + path + ": " + e.getMessage());
+        }
+    }
+
+    /** Best-effort recursive byte size of a directory tree, for observability logging. */
+    private long directorySizeBytes(Path dir) {
+        try (var paths = Files.walk(dir)) {
+            return paths.filter(Files::isRegularFile).mapToLong(p -> {
+                try { return Files.size(p); } catch (Exception e) { return 0L; }
+            }).sum();
+        } catch (Exception e) {
+            return 0L;
         }
     }
 

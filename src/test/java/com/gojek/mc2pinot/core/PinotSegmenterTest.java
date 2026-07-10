@@ -76,6 +76,10 @@ class PinotSegmenterTest {
         assertEquals(2, result.inputRecordCount());
         assertTrue(result.inputRecordSize() > 0);
 
+        // Incremental cleanup: the input file is deleted once it has been split, not held
+        // on disk until the run ends.
+        assertFalse(Files.exists(dataFile));
+
         verify(reader).read();
         verify(writer).write(eq("test_table_OFFLINE_12345_0.tar.gz"), any(Path.class));
     }
