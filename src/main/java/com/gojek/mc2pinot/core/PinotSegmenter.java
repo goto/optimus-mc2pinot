@@ -70,6 +70,21 @@ public class PinotSegmenter {
      */
     private int segmentCount = 0;
 
+    /**
+     * Whether to keep each segment's local {@code .tar.gz} on disk after it has been written to
+     * deep storage. Defaults to {@code true} (original behaviour). Set to {@code false} when the
+     * downstream uploader pushes by URI/metadata and never reads the local tar, so it can be freed
+     * immediately instead of sitting on disk through the whole upload phase.
+     */
+    private boolean retainLocalSegmentTar = true;
+
+    /**
+     * Whether to keep each segment's local metadata tar on disk after deep-storage write. Defaults
+     * to {@code true}. Set to {@code false} for URI-mode uploads, which need neither the tar nor the
+     * metadata locally.
+     */
+    private boolean retainLocalMetadata = true;
+
     /** Convenience constructor – parallelism defaults to the number of available CPU cores. */
     public PinotSegmenter(Reader reader, Writer writer, String segmentKey,
                           String inputFormat, Schema schema, TableConfig tableConfig,
@@ -123,6 +138,22 @@ public class PinotSegmenter {
      */
     public PinotSegmenter setSegmentCount(int segmentCount) {
         this.segmentCount = segmentCount;
+        return this;
+    }
+
+    /**
+     * Controls whether local segment artifacts are kept after each segment is written to deep
+     * storage. Freeing them as soon as they are durably uploaded keeps peak disk from carrying the
+     * full output set through the (slow, one-at-a-time) upload phase. Returns {@code this} for
+     * fluent chaining.
+     *
+     * @param retainSegmentTar keep the local {@code .tar.gz} (required only when the uploader pushes
+     *                         the file itself, e.g. FILE mode)
+     * @param retainMetadata   keep the local metadata tar (required for METADATA-mode uploads)
+     */
+    public PinotSegmenter setLocalArtifactRetention(boolean retainSegmentTar, boolean retainMetadata) {
+        this.retainLocalSegmentTar = retainSegmentTar;
+        this.retainLocalMetadata = retainMetadata;
         return this;
     }
 
@@ -281,10 +312,25 @@ public class PinotSegmenter {
                     long outputRecordCount = built.totalDocs();
                     long outputRecordSize = built.tarFile().length();
 
-                    String remoteURI = writer.write(segmentName + ".tar.gz", built.tarFile().toPath());
+                    Path localTarPath = built.tarFile().toPath();
+                    Path metadataPath = built.metadataFile() == null ? null : built.metadataFile().toPath();
+
+                    String remoteURI = writer.write(segmentName + ".tar.gz", localTarPath);
                     LOG.info("transient(oss): upload result segment " + segmentName + " with " + outputRecordCount + " records and size " + outputRecordSize + " bytes" + " to " + remoteURI);
-                    return new SegmentInfo(segmentName, remoteURI, built.tarFile().toPath(),
-                            built.metadataFile() == null ? null : built.metadataFile().toPath(),
+
+                    // Now that the segment is durably in deep storage, free the local artifacts the
+                    // downstream uploader won't read, so the output set doesn't sit on disk through
+                    // the whole (slow, one-at-a-time) upload phase.
+                    if (!retainLocalSegmentTar) {
+                        deleteFileQuietly(localTarPath);
+                        localTarPath = null;
+                    }
+                    if (!retainLocalMetadata && metadataPath != null) {
+                        deleteFileQuietly(metadataPath);
+                        metadataPath = null;
+                    }
+
+                    return new SegmentInfo(segmentName, remoteURI, localTarPath, metadataPath,
                             outputRecordCount, outputRecordSize);
                 } catch (Exception e) {
                     throw new CompletionException(e);

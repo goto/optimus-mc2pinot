@@ -94,10 +94,20 @@ public class Main {
 
                 fs.cleaner().clean(segmentFolderURI + "/");
 
+                UploadMode uploadMode = resolveUploadMode(
+                        pinotConfig.getDeepStorageURI(), pinotConfig.getDeepStorageURIUploadType());
+                LOG.info("resolved upload mode: " + uploadMode);
+
                 PinotSegmenter segmenter = new PinotSegmenter(
                         ossReader, fs.writer(), pinotConfig.getSegmentKey(),
                         pinotConfig.getInputFormat(), schema, tableConfig, partitionFunction)
-                        .setSegmentCount(pinotConfig.getSegmentCount());
+                        .setSegmentCount(pinotConfig.getSegmentCount())
+                        // Keep the local tar only when the uploader pushes the file itself (FILE mode);
+                        // keep local metadata unless URI mode ignores it. This lets URI/METADATA runs
+                        // free segment tars as soon as they reach deep storage.
+                        .setLocalArtifactRetention(
+                                uploadMode == UploadMode.FILE,
+                                uploadMode != UploadMode.URI);
 
                 GenerationResult result = segmenter.generateSegment();
                 List<SegmentInfo> segments = result.segments();
@@ -107,10 +117,6 @@ public class Main {
 
                 PayloadTemplateRenderer renderer = new PayloadTemplateRenderer(
                         pinotConfig.getCustomPayloadTemplatePath());
-
-                UploadMode uploadMode = resolveUploadMode(
-                        pinotConfig.getDeepStorageURI(), pinotConfig.getDeepStorageURIUploadType());
-                LOG.info("resolved upload mode: " + uploadMode);
 
                 HttpClient httpClient = HttpClient.newBuilder()
                         .version(HttpClient.Version.HTTP_1_1)

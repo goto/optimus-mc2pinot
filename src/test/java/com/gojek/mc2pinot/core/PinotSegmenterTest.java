@@ -174,6 +174,54 @@ class PinotSegmenterTest {
         verify(writer, times(2)).write(anyString(), any(Path.class));
     }
 
+    // ── local artifact retention (URI/METADATA disk savings) ──────────────────
+
+    @Test
+    void shouldFreeTarAndMetadataWhenRetentionFullyDisabled() throws Exception {
+        // URI-mode semantics: the uploader pushes by remote URI and reads neither local file.
+        Path dataFile = createTestDataFile();
+        when(reader.read()).thenReturn(List.of(dataFile));
+        when(writer.write(anyString(), any(Path.class)))
+                .thenAnswer(inv -> "oss://bucket/segments/" + inv.getArgument(0));
+
+        PinotSegmenter segmenter = new PinotSegmenter(
+                reader, writer, "77", "json", schema, tableConfig, null)
+                .setLocalArtifactRetention(false, false);
+
+        GenerationResult result = segmenter.generateSegment();
+
+        assertEquals(1, result.segments().size());
+        SegmentInfo seg = result.segments().get(0);
+
+        // Segment was still persisted to deep storage...
+        assertTrue(seg.remoteURI().startsWith("oss://bucket/segments/"));
+        verify(writer, times(1)).write(anyString(), any(Path.class));
+
+        // ...but the local tar and metadata were freed immediately after the write.
+        assertNull(seg.localPath());
+        assertNull(seg.metadataPath());
+    }
+
+    @Test
+    void shouldFreeTarButKeepMetadataForMetadataMode() throws Exception {
+        // METADATA-mode semantics: the uploader needs the small metadata tar but not the segment tar.
+        Path dataFile = createTestDataFile();
+        when(reader.read()).thenReturn(List.of(dataFile));
+        when(writer.write(anyString(), any(Path.class)))
+                .thenAnswer(inv -> "oss://bucket/segments/" + inv.getArgument(0));
+
+        PinotSegmenter segmenter = new PinotSegmenter(
+                reader, writer, "78", "json", schema, tableConfig, null)
+                .setLocalArtifactRetention(false, true);
+
+        GenerationResult result = segmenter.generateSegment();
+
+        SegmentInfo seg = result.segments().get(0);
+        assertNull(seg.localPath());
+        assertNotNull(seg.metadataPath());
+        assertTrue(Files.exists(seg.metadataPath()));
+    }
+
     // ── error propagation ─────────────────────────────────────────────────────
 
     @Test
