@@ -85,6 +85,23 @@ public class PinotSegmenter {
      */
     private boolean retainLocalMetadata = true;
 
+    /**
+     * Called for each segment as soon as it is built and written to deep storage, so callers can
+     * push it to the Pinot controller while the remaining segments are still being built. Defaults
+     * to a no-op (segments are only returned in the {@link GenerationResult}).
+     */
+    private SegmentSink segmentSink = (segment, inputRecordCount, inputRecordSize) -> {};
+
+    /**
+     * Receives each completed segment during the build phase. {@code inputRecordCount} and
+     * {@code inputRecordSize} are the run-level totals (known before the build phase) so the sink can
+     * render an upload payload without waiting for {@link #generateSegment()} to return.
+     */
+    @FunctionalInterface
+    public interface SegmentSink {
+        void accept(SegmentInfo segment, long inputRecordCount, long inputRecordSize) throws Exception;
+    }
+
     /** Convenience constructor – parallelism defaults to the number of available CPU cores. */
     public PinotSegmenter(Reader reader, Writer writer, String segmentKey,
                           String inputFormat, Schema schema, TableConfig tableConfig,
@@ -157,6 +174,16 @@ public class PinotSegmenter {
         return this;
     }
 
+    /**
+     * Registers a sink invoked for each segment the moment it is built and written to deep storage,
+     * enabling the caller to push segments to the controller interleaved with building the rest.
+     * Returns {@code this} for fluent chaining.
+     */
+    public PinotSegmenter setSegmentSink(SegmentSink segmentSink) {
+        this.segmentSink = segmentSink;
+        return this;
+    }
+
     public GenerationResult generateSegment() throws Exception {
         String tableName = tableConfig.getTableName();
         PartitionSpec partitionSpec = extractPartitionSpec();
@@ -198,7 +225,8 @@ public class PinotSegmenter {
             LOG.info("transient(core): read " + dataFiles.size() + " input files with total "
                     + inputRecordCount + " records and " + inputRecordSize + " bytes");
 
-            results = buildSegmentsParallel(splitFiles, partitionSpec, tableName, outputDir);
+            results = buildSegmentsParallel(splitFiles, partitionSpec, tableName, outputDir,
+                    inputRecordCount, inputRecordSize);
 
         } catch (Exception e) {
             deleteDirectory(outputDir.toFile());
@@ -286,13 +314,18 @@ public class PinotSegmenter {
     }
 
     /**
-     * Builds and uploads one segment per partition, all concurrently.
+     * Builds and uploads one segment per partition, all concurrently. As each segment finishes
+     * building (and is written to deep storage) it is handed to {@link #segmentSink} — so callers can
+     * push it to the controller while later segments are still building. Segments are drained in
+     * partition order, so the sink is invoked serially in that order.
      */
     private List<SegmentInfo> buildSegmentsParallel(
             Map<Integer, List<Path>> splitFiles,
             PartitionSpec partitionSpec,
             String tableName,
-            Path outputDir) throws Exception {
+            Path outputDir,
+            long inputRecordCount,
+            long inputRecordSize) throws Exception {
 
         String tableNameVal = tableName;
         int threads = Math.min(partitionSpec.count(), buildParallelism);
@@ -351,7 +384,10 @@ public class PinotSegmenter {
         List<SegmentInfo> results = new ArrayList<>();
         try {
             for (CompletableFuture<SegmentInfo> future : futures) {
-                results.add(future.get());
+                SegmentInfo built = future.get();
+                results.add(built);
+                // Hand off for controller push while the remaining segments keep building.
+                segmentSink.accept(built, inputRecordCount, inputRecordSize);
             }
         } catch (ExecutionException e) {
             Throwable cause = e.getCause();
