@@ -94,24 +94,12 @@ public class Main {
 
                 fs.cleaner().clean(segmentFolderURI + "/");
 
-                PinotSegmenter segmenter = new PinotSegmenter(
-                        ossReader, fs.writer(), pinotConfig.getSegmentKey(),
-                        pinotConfig.getInputFormat(), schema, tableConfig, partitionFunction)
-                        .setSegmentCount(pinotConfig.getSegmentCount());
-
-                GenerationResult result = segmenter.generateSegment();
-                List<SegmentInfo> segments = result.segments();
-
-                long inputRecordCount = result.inputRecordCount();
-                long inputRecordSize = result.inputRecordSize();
-
-                PayloadTemplateRenderer renderer = new PayloadTemplateRenderer(
-                        pinotConfig.getCustomPayloadTemplatePath());
-
                 UploadMode uploadMode = resolveUploadMode(
                         pinotConfig.getDeepStorageURI(), pinotConfig.getDeepStorageURIUploadType());
                 LOG.info("resolved upload mode: " + uploadMode);
 
+                PayloadTemplateRenderer renderer = new PayloadTemplateRenderer(
+                        pinotConfig.getCustomPayloadTemplatePath());
                 HttpClient httpClient = HttpClient.newBuilder()
                         .version(HttpClient.Version.HTTP_1_1)
                         .build();
@@ -120,22 +108,41 @@ public class Main {
                 PinotClient pinotClient = new DefaultPinotClient(pinotConfig.getHost(), httpClient, customHeaders);
                 PinotSegmentUploader uploader = new PinotSegmentUploader(
                         pinotClient, uploadMode, fs.cleaner(), pinotConfig.getSegmentPushDelayInSeconds());
-                uploader.upload(segments, tableName, segment -> {
-                    SegmentPayloadContext ctx = new SegmentPayloadContext(
-                            inputRecordCount,
-                            inputRecordSize,
-                            tableName,
-                            segment.segmentName(),
-                            segment.outputRecordCount(),
-                            segment.outputRecordSize()
-                    );
-                    try {
-                        return renderer.render(ctx);
-                    } catch (IOException e) {
-                        throw new RuntimeException("Failed to render payload template for segment "
-                                + segment.segmentName(), e);
-                    }
-                });
+
+                PinotSegmenter segmenter = new PinotSegmenter(
+                        ossReader, fs.writer(), pinotConfig.getSegmentKey(),
+                        pinotConfig.getInputFormat(), schema, tableConfig, partitionFunction)
+                        .setSegmentCount(pinotConfig.getSegmentCount())
+                        // Keep the local tar only when the uploader pushes the file itself (FILE mode);
+                        // keep local metadata unless URI mode ignores it. This lets URI/METADATA runs
+                        // free segment tars as soon as they reach deep storage.
+                        .setLocalArtifactRetention(
+                                uploadMode == UploadMode.FILE,
+                                uploadMode != UploadMode.URI)
+                        // Push each segment to the controller the moment it is built, so the
+                        // (rate-limited) push overlaps with building the remaining segments instead
+                        // of running as a separate phase afterwards.
+                        .setSegmentSink((segment, inputRecordCount, inputRecordSize) ->
+                                uploader.uploadOne(segment, tableName, seg -> {
+                                    SegmentPayloadContext ctx = new SegmentPayloadContext(
+                                            inputRecordCount,
+                                            inputRecordSize,
+                                            tableName,
+                                            seg.segmentName(),
+                                            seg.outputRecordCount(),
+                                            seg.outputRecordSize()
+                                    );
+                                    try {
+                                        return renderer.render(ctx);
+                                    } catch (IOException e) {
+                                        throw new RuntimeException("Failed to render payload template for segment "
+                                                + seg.segmentName(), e);
+                                    }
+                                }));
+
+                GenerationResult result = segmenter.generateSegment();
+                LOG.info("sink(pinot): pushed " + result.segments().size() + " segments");
+
                 new OSSCleaner(mcOssClient).clean(mcConfig.getOssDestinationURI() + "/");
             }
         } finally {

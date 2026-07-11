@@ -35,6 +35,7 @@ import java.util.Map;
 import java.util.Set;
 import java.util.*;
 import java.util.concurrent.*;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.logging.Logger;
 
 public class PinotSegmenter {
@@ -68,6 +69,38 @@ public class PinotSegmenter {
      * Set via {@link #setSegmentCount(int)}.
      */
     private int segmentCount = 0;
+
+    /**
+     * Whether to keep each segment's local {@code .tar.gz} on disk after it has been written to
+     * deep storage. Defaults to {@code true} (original behaviour). Set to {@code false} when the
+     * downstream uploader pushes by URI/metadata and never reads the local tar, so it can be freed
+     * immediately instead of sitting on disk through the whole upload phase.
+     */
+    private boolean retainLocalSegmentTar = true;
+
+    /**
+     * Whether to keep each segment's local metadata tar on disk after deep-storage write. Defaults
+     * to {@code true}. Set to {@code false} for URI-mode uploads, which need neither the tar nor the
+     * metadata locally.
+     */
+    private boolean retainLocalMetadata = true;
+
+    /**
+     * Called for each segment as soon as it is built and written to deep storage, so callers can
+     * push it to the Pinot controller while the remaining segments are still being built. Defaults
+     * to a no-op (segments are only returned in the {@link GenerationResult}).
+     */
+    private SegmentSink segmentSink = (segment, inputRecordCount, inputRecordSize) -> {};
+
+    /**
+     * Receives each completed segment during the build phase. {@code inputRecordCount} and
+     * {@code inputRecordSize} are the run-level totals (known before the build phase) so the sink can
+     * render an upload payload without waiting for {@link #generateSegment()} to return.
+     */
+    @FunctionalInterface
+    public interface SegmentSink {
+        void accept(SegmentInfo segment, long inputRecordCount, long inputRecordSize) throws Exception;
+    }
 
     /** Convenience constructor – parallelism defaults to the number of available CPU cores. */
     public PinotSegmenter(Reader reader, Writer writer, String segmentKey,
@@ -125,21 +158,51 @@ public class PinotSegmenter {
         return this;
     }
 
+    /**
+     * Controls whether local segment artifacts are kept after each segment is written to deep
+     * storage. Freeing them as soon as they are durably uploaded keeps peak disk from carrying the
+     * full output set through the (slow, one-at-a-time) upload phase. Returns {@code this} for
+     * fluent chaining.
+     *
+     * @param retainSegmentTar keep the local {@code .tar.gz} (required only when the uploader pushes
+     *                         the file itself, e.g. FILE mode)
+     * @param retainMetadata   keep the local metadata tar (required for METADATA-mode uploads)
+     */
+    public PinotSegmenter setLocalArtifactRetention(boolean retainSegmentTar, boolean retainMetadata) {
+        this.retainLocalSegmentTar = retainSegmentTar;
+        this.retainLocalMetadata = retainMetadata;
+        return this;
+    }
+
+    /**
+     * Registers a sink invoked for each segment the moment it is built and written to deep storage,
+     * enabling the caller to push segments to the controller interleaved with building the rest.
+     * Returns {@code this} for fluent chaining.
+     */
+    public PinotSegmenter setSegmentSink(SegmentSink segmentSink) {
+        this.segmentSink = segmentSink;
+        return this;
+    }
+
     public GenerationResult generateSegment() throws Exception {
         String tableName = tableConfig.getTableName();
         PartitionSpec partitionSpec = extractPartitionSpec();
-
-        LOG.info("transient(core): start generating " + partitionSpec.count()
-                + " segments (partitionCount=" + partitionSpec.partitionCount()
-                + ") with splitParallelism=" + splitParallelism
-                + " buildParallelism=" + buildParallelism + "...");
 
         // One assigner shared by all concurrent splitters so the S>P round-robin counters are
         // global — otherwise many small inputs could each fill only the first sub-segment per pid.
         SegmentAssigner assigner = new SegmentAssigner(partitionSpec, partitionFunction);
 
+        LOG.info("transient(core): reading input files...");
         List<Path> dataFiles = reader.read();
         long inputRecordSize = computeInputRecordSize(dataFiles);
+        LOG.info("transient(core): read " + dataFiles.size() + " input files, total input size "
+                + inputRecordSize + " bytes");
+
+        LOG.info("transient(core): start generating " + partitionSpec.count()
+                + " segments (partitionCount=" + partitionSpec.partitionCount()
+                + ") from " + dataFiles.size() + " input files (" + inputRecordSize + " bytes)"
+                + " with splitParallelism=" + splitParallelism
+                + " buildParallelism=" + buildParallelism + "...");
 
         Path splitDir = Files.createTempDirectory("segment-split-");
         Path outputDir = Files.createTempDirectory("segment-output-");
@@ -153,13 +216,17 @@ public class PinotSegmenter {
             Map<Integer, List<Path>> splitFiles =
                     splitInputFilesParallel(dataFiles, splitDir, partitionSpec, assigner);
 
+            LOG.info("transient(core): split-phase on-disk footprint " + directorySizeBytes(splitDir)
+                    + " bytes across " + partitionSpec.count() + " segments (inputs freed)");
+
             for (List<Path> paths : splitFiles.values()) {
                 inputRecordCount += countRecordsInFiles(paths);
             }
             LOG.info("transient(core): read " + dataFiles.size() + " input files with total "
                     + inputRecordCount + " records and " + inputRecordSize + " bytes");
 
-            results = buildSegmentsParallel(splitFiles, partitionSpec, tableName, outputDir);
+            results = buildSegmentsParallel(splitFiles, partitionSpec, tableName, outputDir,
+                    inputRecordCount, inputRecordSize);
 
         } catch (Exception e) {
             deleteDirectory(outputDir.toFile());
@@ -189,6 +256,11 @@ public class PinotSegmenter {
         int threads = Math.min(dataFiles.size(), splitParallelism);
         ExecutorService executor = Executors.newFixedThreadPool(Math.max(threads, 1));
 
+        // Progress heartbeat: the split phase is otherwise silent for minutes, which is
+        // indistinguishable from a hang and lets log-follow watchers time out.
+        final int totalFiles = dataFiles.size();
+        final AtomicInteger completed = new AtomicInteger();
+
         List<CompletableFuture<Map<Integer, List<Path>>>> futures = new ArrayList<>();
         for (int i = 0; i < dataFiles.size(); i++) {
             final Path file = dataFiles.get(i);
@@ -199,9 +271,19 @@ public class PinotSegmenter {
             CompletableFuture<Map<Integer, List<Path>>> future = CompletableFuture.supplyAsync(() -> {
                 FileSplitter splitter = createFileSplitter(spec, fileDir, assigner);
                 try {
+                    long fileBytes = 0;
+                    try { fileBytes = Files.size(file); } catch (Exception ignored) {}
                     splitter.split(file);
                     splitter.close();
-                    return splitter.splitFiles();
+                    Map<Integer, List<Path>> splitFiles = splitter.splitFiles();
+                    // Free the input copy as soon as it has been re-partitioned into split files.
+                    // Nothing downstream reads the raw input again (record count/size are already
+                    // accounted for), so this keeps split-phase disk at ~1x the dataset instead of
+                    // holding every input alongside every split until the run ends.
+                    deleteFileQuietly(file);
+                    LOG.info("transient(core): split progress " + completed.incrementAndGet()
+                            + "/" + totalFiles + " input files done (last file " + fileBytes + " bytes)");
+                    return splitFiles;
                 } catch (Exception e) {
                     try { splitter.close(); } catch (Exception ignored) {}
                     throw new CompletionException(e);
@@ -232,13 +314,18 @@ public class PinotSegmenter {
     }
 
     /**
-     * Builds and uploads one segment per partition, all concurrently.
+     * Builds and uploads one segment per partition, all concurrently. As each segment finishes
+     * building (and is written to deep storage) it is handed to {@link #segmentSink} — so callers can
+     * push it to the controller while later segments are still building. Segments are drained in
+     * partition order, so the sink is invoked serially in that order.
      */
     private List<SegmentInfo> buildSegmentsParallel(
             Map<Integer, List<Path>> splitFiles,
             PartitionSpec partitionSpec,
             String tableName,
-            Path outputDir) throws Exception {
+            Path outputDir,
+            long inputRecordCount,
+            long inputRecordSize) throws Exception {
 
         String tableNameVal = tableName;
         int threads = Math.min(partitionSpec.count(), buildParallelism);
@@ -258,13 +345,35 @@ public class PinotSegmenter {
                     long outputRecordCount = built.totalDocs();
                     long outputRecordSize = built.tarFile().length();
 
-                    String remoteURI = writer.write(segmentName + ".tar.gz", built.tarFile().toPath());
+                    Path localTarPath = built.tarFile().toPath();
+                    Path metadataPath = built.metadataFile() == null ? null : built.metadataFile().toPath();
+
+                    String remoteURI = writer.write(segmentName + ".tar.gz", localTarPath);
                     LOG.info("transient(oss): upload result segment " + segmentName + " with " + outputRecordCount + " records and size " + outputRecordSize + " bytes" + " to " + remoteURI);
-                    return new SegmentInfo(segmentName, remoteURI, built.tarFile().toPath(),
-                            built.metadataFile() == null ? null : built.metadataFile().toPath(),
+
+                    // Now that the segment is durably in deep storage, free the local artifacts the
+                    // downstream uploader won't read, so the output set doesn't sit on disk through
+                    // the whole (slow, one-at-a-time) upload phase.
+                    if (!retainLocalSegmentTar) {
+                        deleteFileQuietly(localTarPath);
+                        localTarPath = null;
+                    }
+                    if (!retainLocalMetadata && metadataPath != null) {
+                        deleteFileQuietly(metadataPath);
+                        metadataPath = null;
+                    }
+
+                    return new SegmentInfo(segmentName, remoteURI, localTarPath, metadataPath,
                             outputRecordCount, outputRecordSize);
                 } catch (Exception e) {
                     throw new CompletionException(e);
+                } finally {
+                    // Free this partition's split files now that its segment is built; these paths
+                    // are unique to this partition, so no other concurrent build needs them. The
+                    // split dir drains as segment output accumulates, keeping peak disk ~1x.
+                    for (Path partFile : partFiles) {
+                        deleteFileQuietly(partFile);
+                    }
                 }
             }, executor);
 
@@ -275,7 +384,10 @@ public class PinotSegmenter {
         List<SegmentInfo> results = new ArrayList<>();
         try {
             for (CompletableFuture<SegmentInfo> future : futures) {
-                results.add(future.get());
+                SegmentInfo built = future.get();
+                results.add(built);
+                // Hand off for controller push while the remaining segments keep building.
+                segmentSink.accept(built, inputRecordCount, inputRecordSize);
             }
         } catch (ExecutionException e) {
             Throwable cause = e.getCause();
@@ -471,6 +583,26 @@ public class PinotSegmenter {
                     taos.closeArchiveEntry();
                 }
             }
+        }
+    }
+
+    /** Deletes a temp file best-effort; failures are logged, never propagated (runs on worker threads). */
+    private void deleteFileQuietly(Path path) {
+        try {
+            Files.deleteIfExists(path);
+        } catch (Exception e) {
+            LOG.warning("transient(core): could not delete temp file " + path + ": " + e.getMessage());
+        }
+    }
+
+    /** Best-effort recursive byte size of a directory tree, for observability logging. */
+    private long directorySizeBytes(Path dir) {
+        try (var paths = Files.walk(dir)) {
+            return paths.filter(Files::isRegularFile).mapToLong(p -> {
+                try { return Files.size(p); } catch (Exception e) { return 0L; }
+            }).sum();
+        } catch (Exception e) {
+            return 0L;
         }
     }
 

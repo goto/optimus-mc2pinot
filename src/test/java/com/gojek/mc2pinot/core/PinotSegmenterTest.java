@@ -76,6 +76,10 @@ class PinotSegmenterTest {
         assertEquals(2, result.inputRecordCount());
         assertTrue(result.inputRecordSize() > 0);
 
+        // Incremental cleanup: the input file is deleted once it has been split, not held
+        // on disk until the run ends.
+        assertFalse(Files.exists(dataFile));
+
         verify(reader).read();
         verify(writer).write(eq("test_table_OFFLINE_12345_0.tar.gz"), any(Path.class));
     }
@@ -168,6 +172,85 @@ class PinotSegmenterTest {
 
         verify(reader, times(1)).read();
         verify(writer, times(2)).write(anyString(), any(Path.class));
+    }
+
+    // ── local artifact retention (URI/METADATA disk savings) ──────────────────
+
+    @Test
+    void shouldFreeTarAndMetadataWhenRetentionFullyDisabled() throws Exception {
+        // URI-mode semantics: the uploader pushes by remote URI and reads neither local file.
+        Path dataFile = createTestDataFile();
+        when(reader.read()).thenReturn(List.of(dataFile));
+        when(writer.write(anyString(), any(Path.class)))
+                .thenAnswer(inv -> "oss://bucket/segments/" + inv.getArgument(0));
+
+        PinotSegmenter segmenter = new PinotSegmenter(
+                reader, writer, "77", "json", schema, tableConfig, null)
+                .setLocalArtifactRetention(false, false);
+
+        GenerationResult result = segmenter.generateSegment();
+
+        assertEquals(1, result.segments().size());
+        SegmentInfo seg = result.segments().get(0);
+
+        // Segment was still persisted to deep storage...
+        assertTrue(seg.remoteURI().startsWith("oss://bucket/segments/"));
+        verify(writer, times(1)).write(anyString(), any(Path.class));
+
+        // ...but the local tar and metadata were freed immediately after the write.
+        assertNull(seg.localPath());
+        assertNull(seg.metadataPath());
+    }
+
+    @Test
+    void shouldFreeTarButKeepMetadataForMetadataMode() throws Exception {
+        // METADATA-mode semantics: the uploader needs the small metadata tar but not the segment tar.
+        Path dataFile = createTestDataFile();
+        when(reader.read()).thenReturn(List.of(dataFile));
+        when(writer.write(anyString(), any(Path.class)))
+                .thenAnswer(inv -> "oss://bucket/segments/" + inv.getArgument(0));
+
+        PinotSegmenter segmenter = new PinotSegmenter(
+                reader, writer, "78", "json", schema, tableConfig, null)
+                .setLocalArtifactRetention(false, true);
+
+        GenerationResult result = segmenter.generateSegment();
+
+        SegmentInfo seg = result.segments().get(0);
+        assertNull(seg.localPath());
+        assertNotNull(seg.metadataPath());
+        assertTrue(Files.exists(seg.metadataPath()));
+    }
+
+    // ── streaming sink (interleaved controller push) ──────────────────────────
+
+    @Test
+    void shouldInvokeSegmentSinkForEachSegmentWithInputTotals() throws Exception {
+        PartitionFunction alwaysZero = (value, numPartitions) -> 0;
+
+        Path dataFile = createTestDataFile();
+        when(reader.read()).thenReturn(List.of(dataFile));
+        when(writer.write(anyString(), any(Path.class)))
+                .thenAnswer(inv -> "oss://bucket/segments/" + inv.getArgument(0));
+
+        List<String> sunk = new java.util.ArrayList<>();
+        long[] seen = new long[2];
+        PinotSegmenter segmenter = new PinotSegmenter(
+                reader, writer, "88", "json", schema, partitionedTableConfig, alwaysZero)
+                .setSegmentSink((segment, inputRecordCount, inputRecordSize) -> {
+                    sunk.add(segment.segmentName());
+                    seen[0] = inputRecordCount;
+                    seen[1] = inputRecordSize;
+                });
+
+        GenerationResult result = segmenter.generateSegment();
+
+        // Sink fired once per built segment (one per partition, including the empty one).
+        assertEquals(2, result.segments().size());
+        assertEquals(result.segments().size(), sunk.size());
+        // ...and received the run-level input totals so it can render payloads during the build.
+        assertEquals(result.inputRecordCount(), seen[0]);
+        assertEquals(result.inputRecordSize(), seen[1]);
     }
 
     // ── error propagation ─────────────────────────────────────────────────────
