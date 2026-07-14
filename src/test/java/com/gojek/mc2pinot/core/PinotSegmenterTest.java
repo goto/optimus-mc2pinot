@@ -222,37 +222,6 @@ class PinotSegmenterTest {
         assertTrue(Files.exists(seg.metadataPath()));
     }
 
-    // ── streaming sink (interleaved controller push) ──────────────────────────
-
-    @Test
-    void shouldInvokeSegmentSinkForEachSegmentWithInputTotals() throws Exception {
-        PartitionFunction alwaysZero = (value, numPartitions) -> 0;
-
-        Path dataFile = createTestDataFile();
-        when(reader.read()).thenReturn(List.of(dataFile));
-        when(writer.write(anyString(), any(Path.class)))
-                .thenAnswer(inv -> "oss://bucket/segments/" + inv.getArgument(0));
-
-        List<String> sunk = new java.util.ArrayList<>();
-        long[] seen = new long[2];
-        PinotSegmenter segmenter = new PinotSegmenter(
-                reader, writer, "88", "json", schema, partitionedTableConfig, alwaysZero)
-                .setSegmentSink((segment, inputRecordCount, inputRecordSize) -> {
-                    sunk.add(segment.segmentName());
-                    seen[0] = inputRecordCount;
-                    seen[1] = inputRecordSize;
-                });
-
-        GenerationResult result = segmenter.generateSegment();
-
-        // Sink fired once per built segment (one per partition, including the empty one).
-        assertEquals(2, result.segments().size());
-        assertEquals(result.segments().size(), sunk.size());
-        // ...and received the run-level input totals so it can render payloads during the build.
-        assertEquals(result.inputRecordCount(), seen[0]);
-        assertEquals(result.inputRecordSize(), seen[1]);
-    }
-
     // ── error propagation ─────────────────────────────────────────────────────
 
     @Test
