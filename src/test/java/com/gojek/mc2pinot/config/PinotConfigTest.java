@@ -152,6 +152,61 @@ class PinotConfigTest {
         assertTrue(ex.getMessage().contains("PINOT__INPUT_FORMAT"));
     }
 
+    @Test
+    void shouldDefaultSegmentGenerationSkipToFalse() {
+        PinotConfig config = new PinotConfig(buildValidEnv());
+
+        assertFalse(config.isSegmentGenerationSkip());
+        assertNull(config.getSegmentGenerationBucketPath());
+    }
+
+    @Test
+    void shouldEnableSkipModeAndWireOSSFromBucketPath() {
+        Map<String, String> env = new HashMap<>();
+        env.put("PINOT__HOST", "http://localhost:9000");
+        env.put("PINOT__TABLE_CONFIG_FILE_PATH", "/path/to/tableConfig.json");
+        env.put("PINOT__SEGMENT_GENERATION_SKIP", "true");
+        env.put("PINOT__SEGMENT_GENERATION_BUCKET_PATH", "oss://my-bucket/pinot/segments");
+        env.put("PINOT__DEEP_STORAGE_OSS_SERVICE_ACCOUNT", VALID_OSS_SERVICE_ACCOUNT);
+
+        PinotConfig config = new PinotConfig(env);
+
+        assertTrue(config.isSegmentGenerationSkip());
+        assertEquals("oss://my-bucket/pinot/segments", config.getSegmentGenerationBucketPath());
+        // Segment-key/input-format/schema are generation-only and not required in skip mode.
+        assertNull(config.getSegmentKey());
+        assertNull(config.getInputFormat());
+        assertNull(config.getSchemaFilePath());
+        // OSS credentials are wired from the bucket path even without a deep-storage URI.
+        assertNotNull(config.getDeepStorageOssConfig());
+        assertEquals("akid", config.getDeepStorageOssConfig().getAccessKeyId());
+    }
+
+    @Test
+    void shouldThrowWhenSkipEnabledWithoutBucketPath() {
+        Map<String, String> env = new HashMap<>();
+        env.put("PINOT__HOST", "http://localhost:9000");
+        env.put("PINOT__TABLE_CONFIG_FILE_PATH", "/path/to/tableConfig.json");
+        env.put("PINOT__SEGMENT_GENERATION_SKIP", "true");
+
+        IllegalArgumentException ex = assertThrows(IllegalArgumentException.class,
+                () -> new PinotConfig(env));
+        assertTrue(ex.getMessage().contains("PINOT__SEGMENT_GENERATION_BUCKET_PATH"));
+    }
+
+    @Test
+    void shouldStillRequireTableConfigInSkipMode() {
+        Map<String, String> env = new HashMap<>();
+        env.put("PINOT__HOST", "http://localhost:9000");
+        env.put("PINOT__SEGMENT_GENERATION_SKIP", "true");
+        env.put("PINOT__SEGMENT_GENERATION_BUCKET_PATH", "oss://my-bucket/pinot/segments");
+        env.put("PINOT__DEEP_STORAGE_OSS_SERVICE_ACCOUNT", VALID_OSS_SERVICE_ACCOUNT);
+
+        IllegalArgumentException ex = assertThrows(IllegalArgumentException.class,
+                () -> new PinotConfig(env));
+        assertTrue(ex.getMessage().contains("PINOT__TABLE_CONFIG_FILE_PATH"));
+    }
+
     private Map<String, String> buildValidEnv() {
         Map<String, String> env = new HashMap<>();
         env.put("PINOT__HOST", "http://localhost:9000");

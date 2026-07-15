@@ -43,6 +43,14 @@ public class ConfigHelper {
         }
     }
 
+    public static boolean optionalBooleanWithDefault(Map<String, String> env, String key, boolean defaultValue) {
+        String value = env.get(key);
+        if (value == null || value.isBlank()) {
+            return defaultValue;
+        }
+        return Boolean.parseBoolean(value.trim());
+    }
+
     public static String requireJsonField(JsonObject json, String key, String field) {
         if (!json.has(field) || json.get(field).getAsString().isBlank()) {
             throw new IllegalArgumentException("Missing required field in " + key + ": " + field);

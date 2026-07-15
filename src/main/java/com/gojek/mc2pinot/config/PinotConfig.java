@@ -16,6 +16,8 @@ public class PinotConfig {
     private final String deepStorageURIUploadType;
     private final long segmentPushDelayInSeconds;
     private final int segmentCount;
+    private final boolean segmentGenerationSkip;
+    private final String segmentGenerationBucketPath;
     private final OSSConfig deepStorageOssConfig;
 
     private static final long DEFAULT_SEGMENT_PUSH_DELAY_IN_SECONDS = 30L;
@@ -23,13 +25,29 @@ public class PinotConfig {
     private static final int DEFAULT_SEGMENT_COUNT = 0;
 
     public PinotConfig(Map<String, String> env) {
+        this.segmentGenerationSkip = ConfigHelper.optionalBooleanWithDefault(
+                env, Constant.PINOT_SEGMENT_GENERATION_SKIP, false);
+
         this.host = ConfigHelper.requireNonEmpty(env, Constant.PINOT_HOST);
         this.customHeadersPath = env.get(Constant.PINOT_CUSTOM_HEADERS_PATH);
         this.customPayloadTemplatePath = env.get(Constant.PINOT_CUSTOM_PAYLOAD_TEMPLATE_PATH);
-        this.segmentKey = ConfigHelper.requireNonEmpty(env, Constant.PINOT_SEGMENT_KEY);
-        this.inputFormat = ConfigHelper.requireNonEmpty(env, Constant.PINOT_INPUT_FORMAT);
-        this.schemaFilePath = ConfigHelper.requireNonEmpty(env, Constant.PINOT_SCHEMA_FILE_PATH);
+        // Segment-key, input-format and schema only drive segment *generation*; when generation is
+        // skipped the segments already exist, so these become optional.
+        this.segmentKey = segmentGenerationSkip
+                ? env.get(Constant.PINOT_SEGMENT_KEY)
+                : ConfigHelper.requireNonEmpty(env, Constant.PINOT_SEGMENT_KEY);
+        this.inputFormat = segmentGenerationSkip
+                ? env.get(Constant.PINOT_INPUT_FORMAT)
+                : ConfigHelper.requireNonEmpty(env, Constant.PINOT_INPUT_FORMAT);
+        this.schemaFilePath = segmentGenerationSkip
+                ? env.get(Constant.PINOT_SCHEMA_FILE_PATH)
+                : ConfigHelper.requireNonEmpty(env, Constant.PINOT_SCHEMA_FILE_PATH);
+        // Table config is always required — the push needs the table name either way.
         this.tableConfigFilePath = ConfigHelper.requireNonEmpty(env, Constant.PINOT_TABLE_CONFIG_FILE_PATH);
+        // The folder of pre-generated segments; required only when generation is skipped.
+        this.segmentGenerationBucketPath = segmentGenerationSkip
+                ? ConfigHelper.requireNonEmpty(env, Constant.PINOT_SEGMENT_GENERATION_BUCKET_PATH)
+                : env.get(Constant.PINOT_SEGMENT_GENERATION_BUCKET_PATH);
         this.deepStorageURI = env.get(Constant.PINOT_DEEP_STORAGE_URI);
         this.deepStorageURIUploadType = ConfigHelper.optionalWithDefault(
                 env, Constant.PINOT_DEEP_STORAGE_URI_UPLOAD_TYPE, "METADATA").toUpperCase();
@@ -41,8 +59,11 @@ public class PinotConfig {
             throw new IllegalArgumentException(
                     Constant.PINOT_SEGMENT_COUNT + " must be >= 1 (or unset to use the table partition count)");
         }
-        String scheme = resolveScheme(deepStorageURI);
-        this.deepStorageOssConfig = "oss".equals(scheme) ? new OSSConfig(env) : null;
+        // OSS credentials are needed either for the deep-storage sink or, in skip mode, for reading
+        // the pre-generated segment bucket. Both reuse PINOT__DEEP_STORAGE_OSS_SERVICE_ACCOUNT.
+        boolean needsOss = "oss".equals(resolveScheme(deepStorageURI))
+                || (segmentGenerationSkip && "oss".equals(resolveScheme(segmentGenerationBucketPath)));
+        this.deepStorageOssConfig = needsOss ? new OSSConfig(env) : null;
     }
 
     public String getHost() {
@@ -62,7 +83,7 @@ public class PinotConfig {
     }
 
     public String getInputFormat() {
-        return inputFormat.toLowerCase();
+        return inputFormat == null ? null : inputFormat.toLowerCase();
     }
 
     public String getSchemaFilePath() {
@@ -92,6 +113,16 @@ public class PinotConfig {
 
     public OSSConfig getDeepStorageOssConfig() {
         return deepStorageOssConfig;
+    }
+
+    /** When {@code true}, segment generation is skipped and pre-generated segments are pushed as-is. */
+    public boolean isSegmentGenerationSkip() {
+        return segmentGenerationSkip;
+    }
+
+    /** Bucket folder holding the pre-generated segment {@code .tar.gz} files (skip mode only). */
+    public String getSegmentGenerationBucketPath() {
+        return segmentGenerationBucketPath;
     }
 
     private static String resolveScheme(String uri) {
