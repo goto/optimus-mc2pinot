@@ -73,6 +73,7 @@ MC (Maxcompute) ──────► OSS Staging ──────► Segment
 | `PINOT__SEGMENT_PUSH_DELAY_IN_SECONDS` | No | Artificial delay in seconds inserted between consecutive segment pushes to the controller (no delay before the first push). Defaults to `30`. Set to `0` to disable. |
 | `PINOT__SEGMENT_GENERATION_SKIP` | No | When `true`, skips the Maxcompute unload and segment generation entirely, and pushes pre-generated segments already staged in OSS. Defaults to `false`. See [Skip Segment Generation](#skip-segment-generation). |
 | `PINOT__SEGMENT_GENERATION_BUCKET_PATH` | ✅ if skip | OSS folder holding the pre-generated segment `.tar.gz` files (e.g. `oss://bucket/pinot-data/<table_name>/segments_<segment_key>-<suffix>/`). Required when `PINOT__SEGMENT_GENERATION_SKIP=true`. |
+| `PINOT__FORCE_RELOAD_AFTER_PUSH` | No | When `true`, each segment is force-reloaded on the controller after it is pushed (`reload?forceDownload=true`), so Pinot re-downloads and reprocesses it **even when the segment content (CRC) is unchanged**. Defaults to `false`. See [Forcing a reprocess on re-push](#forcing-a-reprocess-on-re-push). |
 
 ### Deep Storage
 Where generated segments are staged before being pushed to Pinot. Segments are written to:
@@ -172,3 +173,25 @@ export PINOT__TABLE_CONFIG_FILE_PATH="/path/to/tableConfig.json"
 export PINOT__DEEP_STORAGE_OSS_SERVICE_ACCOUNT='{...}'
 java -jar target/optimus-mc2pinot.jar
 ```
+
+## Forcing a reprocess on re-push
+
+Pinot identifies a segment by its **name** (`segment.name`) and decides whether to reprocess a
+re-pushed segment by comparing its **CRC**. When you push a segment whose name already exists and whose
+content is byte-identical, each server sees a matching CRC and **keeps its cached copy without
+re-downloading or reprocessing** — so the push appears to "do nothing".
+
+Set `PINOT__FORCE_RELOAD_AFTER_PUSH=true` to work around this. After each segment is pushed, the tool
+calls the controller's reload API with `forceDownload=true`:
+
+```
+POST {PINOT__HOST}/segments/{table}/{segmentName}/reload?type={OFFLINE|REALTIME}&forceDownload=true
+```
+
+`forceDownload=true` makes the servers re-download the segment from its deep-store `DOWNLOAD_URI` and
+reprocess it regardless of the CRC. This keeps the **same segment name** (no duplicate segments) and
+introduces **no query-availability gap** (the segment is replaced in place, not deleted first).
+
+This applies to both a normal run and skip mode. It is a no-op cost on first-time pushes (the reload
+simply loads the freshly added segment). Any custom headers (e.g. auth) are sent on the reload request
+too.

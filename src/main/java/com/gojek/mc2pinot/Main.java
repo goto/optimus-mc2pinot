@@ -183,7 +183,8 @@ public class Main {
                 new CustomHeadersLoader(pinotConfig.getCustomHeadersPath()).load();
         PinotClient pinotClient = new DefaultPinotClient(pinotConfig.getHost(), httpClient, customHeaders);
         PinotSegmentUploader uploader = new PinotSegmentUploader(
-                pinotClient, uploadMode, cleaner, pinotConfig.getSegmentPushDelayInSeconds());
+                pinotClient, uploadMode, cleaner, pinotConfig.getSegmentPushDelayInSeconds(),
+                pinotConfig.isForceReloadAfterPush());
         uploader.upload(result.segments(), tableName, segment -> {
             SegmentPayloadContext ctx = new SegmentPayloadContext(
                     inputRecordCount,
@@ -226,16 +227,23 @@ public class Main {
     static String buildSegmentFolderURI(String deepStorageURI, String tableName, String segmentKey) {
         String base = (deepStorageURI == null || deepStorageURI.isBlank())
                 ? "file:///tmp/mc2pinot"
-                : deepStorageURI.endsWith("/")
-                ? deepStorageURI.substring(0, deepStorageURI.length() - 1)
-                : deepStorageURI;
+                : stripTrailingSlash(deepStorageURI);
+        return base + "/" + tableName + "/segments_" + segmentKey + "-" + randomHex();
+    }
+
+    /** 8-character random hex suffix, e.g. {@code a1b2c3d4}. */
+    private static String randomHex() {
         byte[] bytes = new byte[4];
         new SecureRandom().nextBytes(bytes);
         StringBuilder hex = new StringBuilder(8);
         for (byte b : bytes) {
             hex.append(String.format("%02x", b));
         }
-        return base + "/" + tableName + "/segments_" + segmentKey + "-" + hex;
+        return hex.toString();
+    }
+
+    private static String stripTrailingSlash(String value) {
+        return value.endsWith("/") ? value.substring(0, value.length() - 1) : value;
     }
 
     private static Odps buildOdpsClient(MaxcomputeConfig config) {

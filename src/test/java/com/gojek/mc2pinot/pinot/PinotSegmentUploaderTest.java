@@ -274,6 +274,39 @@ class PinotSegmentUploaderTest {
     }
 
     @Test
+    void shouldForceReloadEachSegmentAfterPushWhenEnabled() throws IOException {
+        PinotSegmentUploader uploader =
+                new PinotSegmentUploader(pinotClient, UploadMode.URI, cleaner, 0L, true);
+        List<SegmentInfo> segments = List.of(
+                new SegmentInfo("seg_0", "oss://bucket/segments/seg_0.tar.gz", null, null, 10, 1024),
+                new SegmentInfo("seg_1", "oss://bucket/segments/seg_1.tar.gz", null, null, 20, 2048)
+        );
+
+        when(pinotClient.triggerUploadFromUri(anyString(), anyString(), anyString())).thenReturn("ok");
+        when(pinotClient.reloadSegment(anyString(), anyString(), anyBoolean())).thenReturn("reloaded");
+
+        uploader.upload(segments, "my_table_OFFLINE", fixedPayload);
+
+        verify(pinotClient).reloadSegment("seg_0", "my_table_OFFLINE", true);
+        verify(pinotClient).reloadSegment("seg_1", "my_table_OFFLINE", true);
+    }
+
+    @Test
+    void shouldNotReloadWhenForceReloadDisabled() throws IOException {
+        PinotSegmentUploader uploader =
+                new PinotSegmentUploader(pinotClient, UploadMode.URI, cleaner, 0L, false);
+        List<SegmentInfo> segments = List.of(
+                new SegmentInfo("seg_0", "oss://bucket/segments/seg_0.tar.gz", null, null, 10, 1024)
+        );
+
+        when(pinotClient.triggerUploadFromUri(anyString(), anyString(), anyString())).thenReturn("ok");
+
+        uploader.upload(segments, "my_table_OFFLINE", fixedPayload);
+
+        verify(pinotClient, never()).reloadSegment(anyString(), anyString(), anyBoolean());
+    }
+
+    @Test
     void shouldCleanAlreadyUploadedSegmentsBeforeMidBatchFailure() throws IOException {
         PinotSegmentUploader uploader = new PinotSegmentUploader(pinotClient, UploadMode.URI, cleaner);
         List<SegmentInfo> segments = List.of(

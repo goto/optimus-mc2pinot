@@ -14,6 +14,7 @@ public class Constant {
     public static final String PINOT_SEGMENT_COUNT = "PINOT__SEGMENT_COUNT";
     public static final String PINOT_SEGMENT_GENERATION_SKIP = "PINOT__SEGMENT_GENERATION_SKIP";
     public static final String PINOT_SEGMENT_GENERATION_BUCKET_PATH = "PINOT__SEGMENT_GENERATION_BUCKET_PATH";
+    public static final String PINOT_FORCE_RELOAD_AFTER_PUSH = "PINOT__FORCE_RELOAD_AFTER_PUSH";
     public static final String PINOT_INPUT_FORMAT = "PINOT__INPUT_FORMAT";
     public static final String PINOT_SCHEMA_FILE_PATH = "PINOT__SCHEMA_FILE_PATH";
     public static final String PINOT_TABLE_CONFIG_FILE_PATH = "PINOT__TABLE_CONFIG_FILE_PATH";

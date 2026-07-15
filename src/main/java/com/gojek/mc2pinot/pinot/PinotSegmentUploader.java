@@ -17,6 +17,7 @@ public class PinotSegmentUploader {
     private final UploadMode uploadMode;
     private final Cleaner cleaner;
     private final long pushDelayInSeconds;
+    private final boolean forceReloadAfterPush;
 
     public PinotSegmentUploader(PinotClient pinotClient, UploadMode uploadMode, Cleaner cleaner) {
         this(pinotClient, uploadMode, cleaner, 0L);
@@ -24,10 +25,16 @@ public class PinotSegmentUploader {
 
     public PinotSegmentUploader(PinotClient pinotClient, UploadMode uploadMode, Cleaner cleaner,
                                 long pushDelayInSeconds) {
+        this(pinotClient, uploadMode, cleaner, pushDelayInSeconds, false);
+    }
+
+    public PinotSegmentUploader(PinotClient pinotClient, UploadMode uploadMode, Cleaner cleaner,
+                                long pushDelayInSeconds, boolean forceReloadAfterPush) {
         this.pinotClient = pinotClient;
         this.uploadMode = uploadMode;
         this.cleaner = cleaner;
         this.pushDelayInSeconds = Math.max(0L, pushDelayInSeconds);
+        this.forceReloadAfterPush = forceReloadAfterPush;
     }
 
     public void upload(List<SegmentInfo> segments, String tableName,
@@ -76,6 +83,12 @@ public class PinotSegmentUploader {
                     }
                     pinotClient.triggerUpload(segment.localPath(), tableName);
                 }
+            }
+            if (forceReloadAfterPush) {
+                // Re-download + reprocess on the servers even when the CRC is unchanged, so a re-push
+                // of a byte-identical segment actually takes effect instead of being cache-skipped.
+                LOG.info("sink(pinot): force-reloading segment " + segment.segmentName());
+                pinotClient.reloadSegment(segment.segmentName(), tableName, true);
             }
             if (segment.localPath() != null) {
                 Files.deleteIfExists(segment.localPath());

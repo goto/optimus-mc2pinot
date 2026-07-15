@@ -20,6 +20,7 @@ public class DefaultPinotClient implements PinotClient {
     private static final Set<String> RESERVED_UPLOAD_FROM_URI_HEADERS = Set.of("content-type", "upload_type", "download_uri");
     private static final Set<String> RESERVED_UPLOAD_BY_METADATA_HEADERS =
             Set.of("content-type", "upload_type", "download_uri", "copy_segment_to_deep_store");
+    private static final Set<String> RESERVED_RELOAD_HEADERS = Set.of();
 
     private final String host;
     private final HttpClient httpClient;
@@ -155,6 +156,37 @@ public class DefaultPinotClient implements PinotClient {
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
             throw new IOException("Pinot upload interrupted", e);
+        }
+    }
+
+    @Override
+    public String reloadSegment(String segmentName, String tableName, boolean forceDownload) throws IOException {
+        String tableType = extractTableType(tableName);
+        String baseTableName = extractBaseTableName(tableName, tableType);
+
+        String url = String.format("%s/segments/%s/%s/reload?type=%s&forceDownload=%s",
+                host,
+                URLEncoder.encode(baseTableName, StandardCharsets.UTF_8),
+                URLEncoder.encode(segmentName, StandardCharsets.UTF_8),
+                URLEncoder.encode(tableType, StandardCharsets.UTF_8),
+                forceDownload);
+
+        HttpRequest.Builder requestBuilder = HttpRequest.newBuilder().uri(URI.create(url));
+        applyCustomHeaders(requestBuilder, RESERVED_RELOAD_HEADERS);
+        HttpRequest request = requestBuilder
+                .POST(HttpRequest.BodyPublishers.noBody())
+                .build();
+
+        try {
+            HttpResponse<String> response = httpClient.send(request, HttpResponse.BodyHandlers.ofString());
+            if (response.statusCode() < 200 || response.statusCode() >= 300) {
+                throw new IOException("Pinot reload failed for segment " + segmentName
+                        + " with status " + response.statusCode() + ": " + response.body());
+            }
+            return response.body();
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            throw new IOException("Pinot reload interrupted", e);
         }
     }
 

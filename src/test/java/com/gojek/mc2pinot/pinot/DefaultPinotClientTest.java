@@ -208,6 +208,72 @@ class DefaultPinotClientTest {
     }
 
     @Test
+    void shouldSendCorrectReloadRequest() throws Exception {
+        when(httpResponse.statusCode()).thenReturn(200);
+        when(httpResponse.body()).thenReturn("{\"status\":\"reloaded\"}");
+        when(httpClient.send(any(HttpRequest.class), any(HttpResponse.BodyHandler.class)))
+                .thenReturn(httpResponse);
+
+        String result = pinotClient.reloadSegment("dummy_table_OFFLINE_0", "dummy_table_OFFLINE", true);
+
+        assertEquals("{\"status\":\"reloaded\"}", result);
+
+        ArgumentCaptor<HttpRequest> requestCaptor = ArgumentCaptor.forClass(HttpRequest.class);
+        verify(httpClient).send(requestCaptor.capture(), any(HttpResponse.BodyHandler.class));
+
+        HttpRequest request = requestCaptor.getValue();
+        assertEquals("POST", request.method());
+        String uri = request.uri().toString();
+        assertTrue(uri.contains("/segments/dummy_table/dummy_table_OFFLINE_0/reload"), uri);
+        assertTrue(uri.contains("type=OFFLINE"), uri);
+        assertTrue(uri.contains("forceDownload=true"), uri);
+    }
+
+    @Test
+    void shouldSendForceDownloadFalseWhenRequested() throws Exception {
+        when(httpResponse.statusCode()).thenReturn(200);
+        when(httpResponse.body()).thenReturn("ok");
+        when(httpClient.send(any(HttpRequest.class), any(HttpResponse.BodyHandler.class)))
+                .thenReturn(httpResponse);
+
+        pinotClient.reloadSegment("seg_0", "my_table", false);
+
+        ArgumentCaptor<HttpRequest> captor = ArgumentCaptor.forClass(HttpRequest.class);
+        verify(httpClient).send(captor.capture(), any(HttpResponse.BodyHandler.class));
+        assertTrue(captor.getValue().uri().toString().contains("forceDownload=false"));
+    }
+
+    @Test
+    void shouldThrowOnNon2xxResponseForReload() throws Exception {
+        when(httpResponse.statusCode()).thenReturn(404);
+        when(httpResponse.body()).thenReturn("Segment not found");
+        when(httpClient.send(any(HttpRequest.class), any(HttpResponse.BodyHandler.class)))
+                .thenReturn(httpResponse);
+
+        IOException ex = assertThrows(IOException.class, () ->
+                pinotClient.reloadSegment("seg_0", "table_OFFLINE", true));
+        assertTrue(ex.getMessage().contains("404"));
+        assertTrue(ex.getMessage().contains("seg_0"));
+    }
+
+    @Test
+    void shouldSendCustomHeadersOnReload() throws Exception {
+        when(httpResponse.statusCode()).thenReturn(200);
+        when(httpResponse.body()).thenReturn("ok");
+        when(httpClient.send(any(HttpRequest.class), any(HttpResponse.BodyHandler.class)))
+                .thenReturn(httpResponse);
+
+        DefaultPinotClient clientWithHeaders = new DefaultPinotClient(
+                "http://localhost:9000", httpClient, Map.of("X-Auth", "secret"));
+
+        clientWithHeaders.reloadSegment("seg_0", "table_OFFLINE", true);
+
+        ArgumentCaptor<HttpRequest> captor = ArgumentCaptor.forClass(HttpRequest.class);
+        verify(httpClient).send(captor.capture(), any(HttpResponse.BodyHandler.class));
+        assertEquals("secret", captor.getValue().headers().firstValue("X-Auth").orElse(""));
+    }
+
+    @Test
     void shouldNotOverrideBuiltInHeadersWithCustomHeaders() throws Exception {
         when(httpResponse.statusCode()).thenReturn(200);
         when(httpResponse.body()).thenReturn("ok");

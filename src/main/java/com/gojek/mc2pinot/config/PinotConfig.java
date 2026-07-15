@@ -18,6 +18,7 @@ public class PinotConfig {
     private final int segmentCount;
     private final boolean segmentGenerationSkip;
     private final String segmentGenerationBucketPath;
+    private final boolean forceReloadAfterPush;
     private final OSSConfig deepStorageOssConfig;
 
     private static final long DEFAULT_SEGMENT_PUSH_DELAY_IN_SECONDS = 30L;
@@ -48,6 +49,8 @@ public class PinotConfig {
         this.segmentGenerationBucketPath = segmentGenerationSkip
                 ? ConfigHelper.requireNonEmpty(env, Constant.PINOT_SEGMENT_GENERATION_BUCKET_PATH)
                 : env.get(Constant.PINOT_SEGMENT_GENERATION_BUCKET_PATH);
+        this.forceReloadAfterPush = ConfigHelper.optionalBooleanWithDefault(
+                env, Constant.PINOT_FORCE_RELOAD_AFTER_PUSH, false);
         this.deepStorageURI = env.get(Constant.PINOT_DEEP_STORAGE_URI);
         this.deepStorageURIUploadType = ConfigHelper.optionalWithDefault(
                 env, Constant.PINOT_DEEP_STORAGE_URI_UPLOAD_TYPE, "METADATA").toUpperCase();
@@ -123,6 +126,15 @@ public class PinotConfig {
     /** Bucket folder holding the pre-generated segment {@code .tar.gz} files (skip mode only). */
     public String getSegmentGenerationBucketPath() {
         return segmentGenerationBucketPath;
+    }
+
+    /**
+     * When {@code true}, each segment is force-reloaded on the controller after it is pushed
+     * ({@code reload?forceDownload=true}). This makes Pinot re-download and reprocess the segment
+     * even when its CRC is unchanged (e.g. re-pushing identical segments).
+     */
+    public boolean isForceReloadAfterPush() {
+        return forceReloadAfterPush;
     }
 
     private static String resolveScheme(String uri) {
