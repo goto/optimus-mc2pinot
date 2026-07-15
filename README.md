@@ -71,6 +71,9 @@ MC (Maxcompute) ──────► OSS Staging ──────► Segment
 | `PINOT__CUSTOM_PAYLOAD_TEMPLATE_PATH` | No | Path to a [FreeMarker](https://freemarker.apache.org/) template file (`.ftl`) rendered as the upload request body per segment. Defaults to `{}` if not set. |
 | `PINOT__CUSTOM_HEADERS_PATH` | No | Path to a JSON file containing custom HTTP headers to include in Pinot requests (e.g. for authentication). Defaults to `{}` if not set. |
 | `PINOT__SEGMENT_PUSH_DELAY_IN_SECONDS` | No | Artificial delay in seconds inserted between consecutive segment pushes to the controller (no delay before the first push). Defaults to `30`. Set to `0` to disable. |
+| `PINOT__SEGMENT_GENERATION_SKIP` | No | When `true`, skips the Maxcompute unload and segment generation entirely, and pushes pre-generated segments already staged in OSS. Defaults to `false`. See [Skip Segment Generation](#skip-segment-generation). |
+| `PINOT__SEGMENT_GENERATION_BUCKET_PATH` | ✅ if skip | OSS folder holding the pre-generated segment `.tar.gz` files (e.g. `oss://bucket/pinot-data/<table_name>/segments_<segment_key>-<suffix>/`). Required when `PINOT__SEGMENT_GENERATION_SKIP=true`. |
+| `PINOT__FORCE_RELOAD_AFTER_PUSH` | No | When `true`, each segment is force-reloaded on the controller after it is pushed (`reload?forceDownload=true`), so Pinot re-downloads and reprocesses it **even when the segment content (CRC) is unchanged**. Defaults to `false`. See [Forcing a reprocess on re-push](#forcing-a-reprocess-on-re-push). |
 
 ### Deep Storage
 Where generated segments are staged before being pushed to Pinot. Segments are written to:
@@ -126,3 +129,69 @@ Example template (`payload.ftl`):
   "output_record_size": ${outputRecordSize}
 }
 ```
+
+## Skip Segment Generation
+
+If the Pinot segments have **already been generated** and staged in an OSS folder (for example, from a
+previous run, or produced out-of-band), you can skip the Maxcompute unload and segment-generation phases
+entirely and go straight to pushing them.
+
+Set:
+
+| Variable | Description |
+|---|---|
+| `PINOT__SEGMENT_GENERATION_SKIP` | `true` to enable skip mode |
+| `PINOT__SEGMENT_GENERATION_BUCKET_PATH` | OSS folder containing the segment `.tar.gz` files, e.g. `oss://bucket/pinot-data/<table_name>/segments_<segment_key>-<suffix>/` |
+
+Each object under the folder is expected to follow the same naming convention a normal generation run
+produces — `<tableName>_<segmentKey>_<partitionNum>.tar.gz`, e.g.
+`myTable_OFFLINE_20260714_23.tar.gz`. The authoritative `segment.name` is read from each segment's
+`metadata.properties`; the file name is only used as a fallback.
+
+In skip mode the tool:
+
+1. **Lists** every `<segmentName>.tar.gz` under the bucket path (directory markers and any `.metadata.tar.gz` sidecars are ignored).
+2. **Streams** each segment tar and extracts only `metadata.properties` + `creation.meta` (a few KB) — the full segment is never downloaded to disk — then reads the authoritative `segment.name` and `segment.total.docs`.
+3. **Stages** a `<segmentName>.metadata.tar.gz` sidecar locally, identical to what a normal generation run produces.
+4. **Pushes** every segment to the Pinot controller using the same uploader, custom payload template, custom headers, upload mode, and push delay as a normal run. The segment's OSS URI becomes its deep-store `DOWNLOAD_URI`.
+
+The upload mode is resolved from `PINOT__DEEP_STORAGE_URI_UPLOAD_TYPE` (`METADATA` default, or `URI`), same as a normal run. **The source segments are never deleted** — they remain the deep-store download target.
+
+### Notes
+
+- Only `oss://` bucket paths are supported. OSS credentials are read from `PINOT__DEEP_STORAGE_OSS_SERVICE_ACCOUNT` (the same account used for deep storage).
+- Because generation is skipped, `PINOT__SEGMENT_KEY`, `PINOT__INPUT_FORMAT`, and `PINOT__SCHEMA_FILE_PATH` are **not required**; the Maxcompute (`MC__*`) variables are ignored.
+- `PINOT__HOST` and `PINOT__TABLE_CONFIG_FILE_PATH` (for the target table name) are still required.
+- The custom payload template's `inputRecordCount` / `inputRecordSize` are `0` in skip mode (no source data is read); `outputRecordCount` comes from the segment's `segment.total.docs` and `outputRecordSize` from the OSS object size.
+
+Example:
+```
+export PINOT__SEGMENT_GENERATION_SKIP=true
+export PINOT__SEGMENT_GENERATION_BUCKET_PATH="oss://bucket/pinot-data/myTable_OFFLINE/segments_20260714-a1b2c3d4/"
+export PINOT__HOST="http://pinot-controller:9000"
+export PINOT__TABLE_CONFIG_FILE_PATH="/path/to/tableConfig.json"
+export PINOT__DEEP_STORAGE_OSS_SERVICE_ACCOUNT='{...}'
+java -jar target/optimus-mc2pinot.jar
+```
+
+## Forcing a reprocess on re-push
+
+Pinot identifies a segment by its **name** (`segment.name`) and decides whether to reprocess a
+re-pushed segment by comparing its **CRC**. When you push a segment whose name already exists and whose
+content is byte-identical, each server sees a matching CRC and **keeps its cached copy without
+re-downloading or reprocessing** — so the push appears to "do nothing".
+
+Set `PINOT__FORCE_RELOAD_AFTER_PUSH=true` to work around this. After each segment is pushed, the tool
+calls the controller's reload API with `forceDownload=true`:
+
+```
+POST {PINOT__HOST}/segments/{table}/{segmentName}/reload?type={OFFLINE|REALTIME}&forceDownload=true
+```
+
+`forceDownload=true` makes the servers re-download the segment from its deep-store `DOWNLOAD_URI` and
+reprocess it regardless of the CRC. This keeps the **same segment name** (no duplicate segments) and
+introduces **no query-availability gap** (the segment is replaced in place, not deleted first).
+
+This applies to both a normal run and skip mode. It is a no-op cost on first-time pushes (the reload
+simply loads the freshly added segment). Any custom headers (e.g. auth) are sent on the reload request
+too.
