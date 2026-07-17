@@ -16,11 +16,14 @@ public class PinotConfig {
     private final String deepStorageURIUploadType;
     private final long segmentPushDelayInSeconds;
     private final int segmentCount;
+    private final int segmentSizeInMb;
     private final OSSConfig deepStorageOssConfig;
 
     private static final long DEFAULT_SEGMENT_PUSH_DELAY_IN_SECONDS = 30L;
     /** 0 means "not configured" — fall back to the table's partition count. */
     private static final int DEFAULT_SEGMENT_COUNT = 0;
+    /** 0 means "not configured" — segment count is not derived from input size. */
+    private static final int DEFAULT_SEGMENT_SIZE_IN_MB = 0;
 
     public PinotConfig(Map<String, String> env) {
         this.host = ConfigHelper.requireNonEmpty(env, Constant.PINOT_HOST);
@@ -40,6 +43,12 @@ public class PinotConfig {
         if (this.segmentCount < 0) {
             throw new IllegalArgumentException(
                     Constant.PINOT_SEGMENT_COUNT + " must be >= 1 (or unset to use the table partition count)");
+        }
+        this.segmentSizeInMb = ConfigHelper.optionalIntWithDefault(
+                env, Constant.PINOT_SEGMENT_SIZE_IN_MB, DEFAULT_SEGMENT_SIZE_IN_MB);
+        if (this.segmentSizeInMb < 0) {
+            throw new IllegalArgumentException(
+                    Constant.PINOT_SEGMENT_SIZE_IN_MB + " must be >= 1 (or unset to derive the count another way)");
         }
         String scheme = resolveScheme(deepStorageURI);
         this.deepStorageOssConfig = "oss".equals(scheme) ? new OSSConfig(env) : null;
@@ -88,6 +97,14 @@ public class PinotConfig {
     /** Configured physical segment count, or 0 to fall back to the table partition count. */
     public int getSegmentCount() {
         return segmentCount;
+    }
+
+    /**
+     * Target segment size in MB used to derive the physical segment count from the total input size,
+     * or 0 when not configured. Takes precedence over {@link #getSegmentCount()} when set.
+     */
+    public int getSegmentSizeInMb() {
+        return segmentSizeInMb;
     }
 
     public OSSConfig getDeepStorageOssConfig() {

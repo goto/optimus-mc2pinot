@@ -71,6 +71,14 @@ public class PinotSegmenter {
     private int segmentCount = 0;
 
     /**
+     * Target segment size in MB. When {@code > 0}, the physical segment count is derived from the
+     * total input size (rounded to the nearest whole segment, minimum 1) and takes precedence over
+     * {@link #segmentCount}. {@code 0} (the default) means "not configured". Set via
+     * {@link #setSegmentSizeInMb(int)}.
+     */
+    private int segmentSizeInMb = 0;
+
+    /**
      * Whether to keep each segment's local {@code .tar.gz} on disk after it has been written to
      * deep storage. Defaults to {@code true} (original behaviour). Set to {@code false} when the
      * downstream uploader pushes by URI/metadata and never reads the local tar, so it can be freed
@@ -142,6 +150,17 @@ public class PinotSegmenter {
     }
 
     /**
+     * Sets the target segment size in MB. When {@code > 0}, the physical segment count is derived
+     * from the total input size — {@code round(totalInputBytes / (segmentSizeInMb * 1MB))}, floored
+     * at 1 — and takes precedence over {@link #setSegmentCount(int)}. Pass {@code <= 0} to disable
+     * size-based sizing. Returns {@code this} for fluent chaining.
+     */
+    public PinotSegmenter setSegmentSizeInMb(int segmentSizeInMb) {
+        this.segmentSizeInMb = segmentSizeInMb;
+        return this;
+    }
+
+    /**
      * Controls whether local segment artifacts are kept after each segment is written to deep
      * storage. Freeing them as soon as they are durably uploaded keeps peak disk from carrying the
      * full output set through the (slow, one-at-a-time) upload phase. Returns {@code this} for
@@ -159,17 +178,20 @@ public class PinotSegmenter {
 
     public GenerationResult generateSegment() throws Exception {
         String tableName = tableConfig.getTableName();
-        PartitionSpec partitionSpec = extractPartitionSpec();
-
-        // One assigner shared by all concurrent splitters so the S>P round-robin counters are
-        // global — otherwise many small inputs could each fill only the first sub-segment per pid.
-        SegmentAssigner assigner = new SegmentAssigner(partitionSpec, partitionFunction);
 
         LOG.info("transient(core): reading input files...");
         List<Path> dataFiles = reader.read();
         long inputRecordSize = computeInputRecordSize(dataFiles);
         LOG.info("transient(core): read " + dataFiles.size() + " input files, total input size "
                 + inputRecordSize + " bytes");
+
+        // Segment count may be derived from the total input size, so the spec is resolved only after
+        // the inputs have been read and sized.
+        PartitionSpec partitionSpec = extractPartitionSpec(inputRecordSize);
+
+        // One assigner shared by all concurrent splitters so the S>P round-robin counters are
+        // global — otherwise many small inputs could each fill only the first sub-segment per pid.
+        SegmentAssigner assigner = new SegmentAssigner(partitionSpec, partitionFunction);
 
         LOG.info("transient(core): start generating " + partitionSpec.count()
                 + " segments (partitionCount=" + partitionSpec.partitionCount()
@@ -438,7 +460,7 @@ public class PinotSegmenter {
         return new BuildResult(tarFile, metadataFile, totalDocs);
     }
 
-    private PartitionSpec extractPartitionSpec() {
+    private PartitionSpec extractPartitionSpec(long inputRecordSize) {
         String partitionColumn = null;
         int numPartitions = 1;
 
@@ -454,9 +476,38 @@ public class PinotSegmenter {
                 numPartitions = entry.getValue().getNumPartitions();
             }
         }
-        // S defaults to P (backward compatible) unless PINOT__SEGMENT_COUNT was configured.
-        int resolvedSegmentCount = segmentCount > 0 ? segmentCount : numPartitions;
+        // Precedence for the physical segment count (S):
+        //   1. PINOT__SEGMENT_SIZE_IN_MB  → derive from the total input size (rounded to nearest).
+        //   2. PINOT__SEGMENT_COUNT       → use the configured count verbatim.
+        //   3. otherwise                  → fall back to the table partition count (P), the original
+        //                                    backward-compatible behaviour.
+        int resolvedSegmentCount;
+        if (segmentSizeInMb > 0) {
+            resolvedSegmentCount = segmentCountFromSize(inputRecordSize, segmentSizeInMb);
+            double inputSizeInMb = (double) inputRecordSize / (1024L * 1024L);
+            double rawRatio = inputSizeInMb / segmentSizeInMb;
+            LOG.info(String.format(
+                    "transient(core): derived segmentCount=%d from inputSize=%.2f MB (%d bytes)"
+                    + " / segmentSize=%d MB = %.4f, rounded to nearest",
+                    resolvedSegmentCount, inputSizeInMb, inputRecordSize,
+                    segmentSizeInMb, rawRatio));
+        } else if (segmentCount > 0) {
+            resolvedSegmentCount = segmentCount;
+        } else {
+            resolvedSegmentCount = numPartitions;
+        }
         return new PartitionSpec(partitionColumn, numPartitions, resolvedSegmentCount);
+    }
+
+    /**
+     * Derives the number of physical segments from the total input size and a target segment size in
+     * MB, rounding to the nearest whole segment and flooring at 1. For example, with a 200 MB target:
+     * 999 MB → 5 and 1001 MB → 5.
+     */
+    static int segmentCountFromSize(long inputRecordSize, int segmentSizeInMb) {
+        long segmentSizeInBytes = (long) segmentSizeInMb * 1024L * 1024L;
+        long rounded = Math.round((double) inputRecordSize / segmentSizeInBytes);
+        return (int) Math.max(1L, rounded);
     }
 
     private long computeInputRecordSize(List<Path> dataFiles) {

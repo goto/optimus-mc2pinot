@@ -102,6 +102,7 @@ public class Main {
                         ossReader, fs.writer(), pinotConfig.getSegmentKey(),
                         pinotConfig.getInputFormat(), schema, tableConfig, partitionFunction)
                         .setSegmentCount(pinotConfig.getSegmentCount())
+                        .setSegmentSizeInMb(pinotConfig.getSegmentSizeInMb())
                         // Keep the local tar only when the uploader pushes the file itself (FILE mode);
                         // keep local metadata unless URI mode ignores it. This lets URI/METADATA runs
                         // free segment tars as soon as they reach deep storage.
