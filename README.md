@@ -71,6 +71,8 @@ MC (Maxcompute) ──────► OSS Staging ──────► Segment
 | `PINOT__CUSTOM_PAYLOAD_TEMPLATE_PATH` | No | Path to a [FreeMarker](https://freemarker.apache.org/) template file (`.ftl`) rendered as the upload request body per segment. Defaults to `{}` if not set. |
 | `PINOT__CUSTOM_HEADERS_PATH` | No | Path to a JSON file containing custom HTTP headers to include in Pinot requests (e.g. for authentication). Defaults to `{}` if not set. |
 | `PINOT__SEGMENT_PUSH_DELAY_IN_SECONDS` | No | Artificial delay in seconds inserted between consecutive segment pushes to the controller (no delay before the first push). Defaults to `30`. Set to `0` to disable. |
+| `PINOT__SEGMENT_COUNT` | No | Number of physical segments to emit. If unset (or `0`), falls back to the table's partition count. |
+| `PINOT__SEGMENT_SIZE_IN_MB` | No | Target segment size in MB. When set, the number of segments is derived from the total input size, rounded to the nearest whole segment (min `1`) — e.g. with a `200` MB target, both `999` MB and `1001` MB of input produce `5` segments. Takes precedence over `PINOT__SEGMENT_COUNT`. |
 
 ### Deep Storage
 Where generated segments are staged before being pushed to Pinot. Segments are written to:

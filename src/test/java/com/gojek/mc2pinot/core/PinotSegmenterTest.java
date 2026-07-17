@@ -261,6 +261,31 @@ class PinotSegmenterTest {
         return file;
     }
 
+    private static final long MB = 1024L * 1024L;
+
+    @Test
+    void segmentCountFromSizeRoundsToNearest() {
+        // 999 MB / 200 MB = 4.995 -> 5
+        assertEquals(5, PinotSegmenter.segmentCountFromSize(999 * MB, 200));
+        // 1001 MB / 200 MB = 5.005 -> 5
+        assertEquals(5, PinotSegmenter.segmentCountFromSize(1001 * MB, 200));
+        // exact multiple
+        assertEquals(5, PinotSegmenter.segmentCountFromSize(1000 * MB, 200));
+    }
+
+    @Test
+    void segmentCountFromSizeRoundsHalfUp() {
+        // 300 MB / 200 MB = 1.5 -> 2
+        assertEquals(2, PinotSegmenter.segmentCountFromSize(300 * MB, 200));
+    }
+
+    @Test
+    void segmentCountFromSizeFloorsAtOne() {
+        // Any non-zero input smaller than the target still yields at least one segment.
+        assertEquals(1, PinotSegmenter.segmentCountFromSize(1 * MB, 200));
+        assertEquals(1, PinotSegmenter.segmentCountFromSize(0, 200));
+    }
+
     private Schema loadSchema(String resource) throws Exception {
         try (InputStream is = getClass().getResourceAsStream(resource)) {
             return Schema.fromInputStream(is);

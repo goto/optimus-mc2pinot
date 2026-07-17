@@ -123,6 +123,43 @@ class PinotConfigTest {
     }
 
     @Test
+    void shouldDefaultSegmentSizeInMbToZero() {
+        PinotConfig config = new PinotConfig(buildValidEnv());
+
+        assertEquals(0, config.getSegmentSizeInMb());
+    }
+
+    @Test
+    void shouldReadConfiguredSegmentSizeInMb() {
+        Map<String, String> env = buildValidEnv();
+        env.put("PINOT__SEGMENT_SIZE_IN_MB", "200");
+
+        PinotConfig config = new PinotConfig(env);
+
+        assertEquals(200, config.getSegmentSizeInMb());
+    }
+
+    @Test
+    void shouldThrowWhenSegmentSizeInMbIsNegative() {
+        Map<String, String> env = buildValidEnv();
+        env.put("PINOT__SEGMENT_SIZE_IN_MB", "-1");
+
+        IllegalArgumentException ex = assertThrows(IllegalArgumentException.class,
+                () -> new PinotConfig(env));
+        assertTrue(ex.getMessage().contains("PINOT__SEGMENT_SIZE_IN_MB"));
+    }
+
+    @Test
+    void shouldThrowWhenSegmentSizeInMbIsNotNumeric() {
+        Map<String, String> env = buildValidEnv();
+        env.put("PINOT__SEGMENT_SIZE_IN_MB", "abc");
+
+        IllegalArgumentException ex = assertThrows(IllegalArgumentException.class,
+                () -> new PinotConfig(env));
+        assertTrue(ex.getMessage().contains("PINOT__SEGMENT_SIZE_IN_MB"));
+    }
+
+    @Test
     void shouldThrowWhenHostMissing() {
         Map<String, String> env = buildValidEnv();
         env.remove("PINOT__HOST");
