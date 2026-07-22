@@ -50,13 +50,13 @@ class PinotConfigTest {
         env.put("PINOT__HOST", "http://localhost:9000");
         env.put("PINOT__SEGMENT_KEY", "1774310400000");
         env.put("PINOT__INPUT_FORMAT", "json");
-        env.put("PINOT__TABLE_NAME", "feature_jg_legacy_offline");
+        env.put("PINOT__TABLE_NAME", "sample_table_offline");
 
         PinotConfig config = new PinotConfig(env);
 
         assertTrue(config.isConfigFromApi());
-        assertEquals("feature_jg_legacy_offline", config.getTableName());
-        assertEquals("feature_jg_legacy_offline", config.getSchemaName());
+        assertEquals("sample_table_offline", config.getTableName());
+        assertEquals("sample_table_offline", config.getSchemaName());
         assertNull(config.getSchemaFilePath());
         assertNull(config.getTableConfigFilePath());
     }
@@ -67,13 +67,13 @@ class PinotConfigTest {
         env.put("PINOT__HOST", "http://localhost:9000");
         env.put("PINOT__SEGMENT_KEY", "1774310400000");
         env.put("PINOT__INPUT_FORMAT", "json");
-        env.put("PINOT__TABLE_NAME", "feature_jg_legacy_OFFLINE");
-        env.put("PINOT__SCHEMA_NAME", "feature_jg_legacy");
+        env.put("PINOT__TABLE_NAME", "sample_table_OFFLINE");
+        env.put("PINOT__SCHEMA_NAME", "sample_table");
 
         PinotConfig config = new PinotConfig(env);
 
-        assertEquals("feature_jg_legacy_OFFLINE", config.getTableName());
-        assertEquals("feature_jg_legacy", config.getSchemaName());
+        assertEquals("sample_table_OFFLINE", config.getTableName());
+        assertEquals("sample_table", config.getSchemaName());
     }
 
     @Test
