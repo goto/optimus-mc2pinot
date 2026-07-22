@@ -66,8 +66,10 @@ MC (Maxcompute) ──────► OSS Staging ──────► Segment
 | `PINOT__HOST` | ✅ | Pinot controller host URL |
 | `PINOT__SEGMENT_KEY` | ✅ | Key used to name generated segments |
 | `PINOT__INPUT_FORMAT` | ✅ | Input format of the Maxcompute data (`JSON`, `PARQUET`) |
-| `PINOT__SCHEMA_FILE_PATH` | ✅ | Path to the Pinot table schema file |
-| `PINOT__TABLE_CONFIG_FILE_PATH` | ✅ | Path to the Pinot table configuration file |
+| `PINOT__TABLE_NAME` | No | Name of the table to fetch the table config from via the Pinot controller API (`GET {PINOT__HOST}/tableConfigs/{PINOT__TABLE_NAME}`). When set, the table config and schema are fetched from the API and `PINOT__SCHEMA_FILE_PATH` / `PINOT__TABLE_CONFIG_FILE_PATH` are ignored. |
+| `PINOT__SCHEMA_NAME` | No | Name of the schema to fetch via the Pinot controller API (`GET {PINOT__HOST}/schemas/{PINOT__SCHEMA_NAME}`). Only used when `PINOT__TABLE_NAME` is set; defaults to `PINOT__TABLE_NAME` when not provided. |
+| `PINOT__SCHEMA_FILE_PATH` | Conditional | Path to the Pinot table schema file. Required when `PINOT__TABLE_NAME` is **not** set. |
+| `PINOT__TABLE_CONFIG_FILE_PATH` | Conditional | Path to the Pinot table configuration file. Required when `PINOT__TABLE_NAME` is **not** set. |
 | `PINOT__CUSTOM_PAYLOAD_TEMPLATE_PATH` | No | Path to a [FreeMarker](https://freemarker.apache.org/) template file (`.ftl`) rendered as the upload request body per segment. Defaults to `{}` if not set. |
 | `PINOT__CUSTOM_HEADERS_PATH` | No | Path to a JSON file containing custom HTTP headers to include in Pinot requests (e.g. for authentication). Defaults to `{}` if not set. |
 | `PINOT__SEGMENT_PUSH_DELAY_IN_SECONDS` | No | Artificial delay in seconds inserted between consecutive segment pushes to the controller (no delay before the first push). Defaults to `30`. Set to `0` to disable. |

@@ -34,6 +34,70 @@ class PinotConfigTest {
     }
 
     @Test
+    void shouldUseFilesWhenTableNameNotSet() {
+        PinotConfig config = new PinotConfig(buildValidEnv());
+
+        assertFalse(config.isConfigFromApi());
+        assertNull(config.getTableName());
+        assertNull(config.getSchemaName());
+        assertEquals("/path/to/schema.json", config.getSchemaFilePath());
+        assertEquals("/path/to/tableConfig.json", config.getTableConfigFilePath());
+    }
+
+    @Test
+    void shouldFetchFromApiWhenTableNameSet() {
+        Map<String, String> env = new HashMap<>();
+        env.put("PINOT__HOST", "http://localhost:9000");
+        env.put("PINOT__SEGMENT_KEY", "1774310400000");
+        env.put("PINOT__INPUT_FORMAT", "json");
+        env.put("PINOT__TABLE_NAME", "sample_table_offline");
+
+        PinotConfig config = new PinotConfig(env);
+
+        assertTrue(config.isConfigFromApi());
+        assertEquals("sample_table_offline", config.getTableName());
+        assertEquals("sample_table_offline", config.getSchemaName());
+        assertNull(config.getSchemaFilePath());
+        assertNull(config.getTableConfigFilePath());
+    }
+
+    @Test
+    void shouldUseExplicitSchemaNameWhenProvided() {
+        Map<String, String> env = new HashMap<>();
+        env.put("PINOT__HOST", "http://localhost:9000");
+        env.put("PINOT__SEGMENT_KEY", "1774310400000");
+        env.put("PINOT__INPUT_FORMAT", "json");
+        env.put("PINOT__TABLE_NAME", "sample_table_OFFLINE");
+        env.put("PINOT__SCHEMA_NAME", "sample_table");
+
+        PinotConfig config = new PinotConfig(env);
+
+        assertEquals("sample_table_OFFLINE", config.getTableName());
+        assertEquals("sample_table", config.getSchemaName());
+    }
+
+    @Test
+    void shouldNotRequireFilePathsWhenTableNameSet() {
+        Map<String, String> env = new HashMap<>();
+        env.put("PINOT__HOST", "http://localhost:9000");
+        env.put("PINOT__SEGMENT_KEY", "1774310400000");
+        env.put("PINOT__INPUT_FORMAT", "json");
+        env.put("PINOT__TABLE_NAME", "my_table");
+
+        assertDoesNotThrow(() -> new PinotConfig(env));
+    }
+
+    @Test
+    void shouldThrowWhenNoTableNameAndNoSchemaFilePath() {
+        Map<String, String> env = buildValidEnv();
+        env.remove("PINOT__SCHEMA_FILE_PATH");
+
+        IllegalArgumentException ex = assertThrows(IllegalArgumentException.class,
+                () -> new PinotConfig(env));
+        assertTrue(ex.getMessage().contains("PINOT__SCHEMA_FILE_PATH"));
+    }
+
+    @Test
     void shouldReturnCustomHeadersPath() {
         Map<String, String> env = buildValidEnv();
         env.put("PINOT__CUSTOM_HEADERS_PATH", "/path/to/headers.json");
